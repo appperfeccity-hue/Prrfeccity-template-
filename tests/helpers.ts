@@ -296,6 +296,7 @@ export async function snapshotSemanticState(designId: string) {
         // The referenced SkuEdge is shared, uncopied catalog data -- the same
         // row id is valid to compare literally across both designs.
         sourceSkuEdgeId: e.sourceSkuEdgeId,
+        origin: e.origin,
       }))
       .sort((a, b) => `${a.fromKey}->${a.toKey}:${a.edgeType}`.localeCompare(`${b.fromKey}->${b.toKey}:${b.edgeType}`)),
     geometryProductRelationships: geoProductRels
@@ -306,6 +307,7 @@ export async function snapshotSemanticState(designId: string) {
         relationshipType: r.relationshipType,
         condition: r.condition,
         quantityRule: r.quantityRule,
+        origin: r.origin,
       }))
       .sort((a, b) => a.key.localeCompare(b.key)),
     templateParameters: params

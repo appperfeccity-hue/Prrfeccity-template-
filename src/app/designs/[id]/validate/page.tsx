@@ -3,6 +3,7 @@
 import { use } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
+import { LiveSummaryStrip } from "@/components/layout/LiveSummaryStrip";
 
 export default function ValidatePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -25,6 +26,7 @@ export default function ValidatePage({ params }: { params: Promise<{ id: string 
 
   return (
     <div>
+      <LiveSummaryStrip designId={id} />
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>

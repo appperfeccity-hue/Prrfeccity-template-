@@ -2,8 +2,9 @@
 
 import { use, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api/client";
+import { api, type FullDesign } from "@/lib/api/client";
 import { useUndoRedo } from "@/lib/undo-redo";
+import { computeSuggestedRelationships } from "@/lib/suggestions";
 
 const RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOUNDARY_OF", "POSITIONED_AT", "ADJACENT_TO"];
 const SKU_EDGE_TYPES = [
@@ -226,33 +227,20 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
               <th>Qty</th>
               <th>Z</th>
               <th>Relationships</th>
+              <th>Suggested</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {instances.map((inst) => {
-              const rels = design?.geometryProductRelationships.filter((r) => r.productInstanceId === inst.id) ?? [];
-              return (
-                <tr key={inst.id}>
-                  <td>{inst.sku?.code}</td>
-                  <td>{inst.sku?.category.label}</td>
-                  <td>{inst.quantity}</td>
-                  <td>{inst.z ?? "—"}</td>
-                  <td>{rels.length ? rels.map((r) => r.relationshipType).join(", ") : "none"}</td>
-                  <td>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => {
-                        if (!confirm("Delete this product? This cannot be undone.")) return;
-                        api.deleteProductInstance(id, inst.id).then(invalidate);
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
+            {instances.map((inst) => (
+              <ProductInstanceRow
+                key={inst.id}
+                designId={id}
+                instance={inst}
+                design={design}
+                invalidate={invalidate}
+              />
+            ))}
           </tbody>
         </table>
         {instances.length === 0 && <p style={{ color: "#888" }}>No products placed yet.</p>}
@@ -319,5 +307,124 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
         </div>
       )}
     </div>
+  );
+}
+
+function ProductInstanceRow({
+  designId,
+  instance,
+  design,
+  invalidate,
+}: {
+  designId: string;
+  instance: FullDesign["productInstances"][number];
+  design: FullDesign | undefined;
+  invalidate: () => void;
+}) {
+  const { pushAction } = useUndoRedo();
+  const [expanded, setExpanded] = useState(false);
+  const skuDetailQuery = useQuery({
+    queryKey: ["sku", instance.skuId],
+    queryFn: () => api.getSku(instance.skuId),
+  });
+
+  const rels = design?.geometryProductRelationships.filter((r) => r.productInstanceId === instance.id) ?? [];
+  const suggestions =
+    skuDetailQuery.data && design
+      ? computeSuggestedRelationships(instance, skuDetailQuery.data, design.productInstanceEdges, design.productInstances)
+      : [];
+
+  const acceptSuggestionMutation = useMutation({
+    mutationFn: async (s: (typeof suggestions)[number]) => {
+      const child = await api.createProductInstance(designId, { skuId: s.toSkuId });
+      const edge = await api.createProductInstanceEdge(designId, {
+        fromInstanceId: instance.id,
+        toInstanceId: child.id,
+        edgeType: s.edgeType,
+        sourceSkuEdgeId: s.skuEdgeId,
+        origin: "CATALOG_DERIVED",
+      });
+      return { child, edge };
+    },
+    onSuccess: (result, s) => {
+      invalidate();
+      let currentChildId = result.child.id;
+      let currentEdgeId = result.edge.id;
+      pushAction({
+        description: `Add suggested ${s.toSkuCode}`,
+        undo: async () => {
+          await api.deleteProductInstanceEdge(designId, currentEdgeId);
+          await api.deleteProductInstance(designId, currentChildId);
+          invalidate();
+        },
+        redo: async () => {
+          const child = await api.createProductInstance(designId, { skuId: s.toSkuId });
+          const edge = await api.createProductInstanceEdge(designId, {
+            fromInstanceId: instance.id,
+            toInstanceId: child.id,
+            edgeType: s.edgeType,
+            sourceSkuEdgeId: s.skuEdgeId,
+            origin: "CATALOG_DERIVED",
+          });
+          currentChildId = child.id;
+          currentEdgeId = edge.id;
+          invalidate();
+        },
+      });
+    },
+  });
+
+  return (
+    <>
+      <tr>
+        <td>{instance.sku?.code}</td>
+        <td>{instance.sku?.category.label}</td>
+        <td>{instance.quantity}</td>
+        <td>{instance.z ?? "—"}</td>
+        <td>{rels.length ? rels.map((r) => r.relationshipType).join(", ") : "none"}</td>
+        <td>
+          {suggestions.length > 0 ? (
+            <button className="btn btn-secondary" onClick={() => setExpanded(!expanded)}>
+              {expanded ? "Hide" : "View"} suggestions ({suggestions.length})
+            </button>
+          ) : (
+            "—"
+          )}
+        </td>
+        <td>
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              if (!confirm("Delete this product? This cannot be undone.")) return;
+              api.deleteProductInstance(designId, instance.id).then(invalidate);
+            }}
+          >
+            Delete
+          </button>
+        </td>
+      </tr>
+      {expanded && suggestions.length > 0 && (
+        <tr style={{ background: "#fafafa" }}>
+          <td colSpan={7}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "4px 0" }}>
+              {suggestions.map((s) => (
+                <div key={s.skuEdgeId} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                  <span>
+                    {s.edgeType} → {s.toSkuCode} — {s.toSkuName}
+                  </span>
+                  <button
+                    className="btn"
+                    disabled={acceptSuggestionMutation.isPending}
+                    onClick={() => acceptSuggestionMutation.mutate(s)}
+                  >
+                    Add
+                  </button>
+                </div>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }

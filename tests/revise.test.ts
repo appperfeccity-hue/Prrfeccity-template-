@@ -206,7 +206,12 @@ describe("reviseTemplate", () => {
       relationshipType: "BOUNDARY_OF",
     });
 
-    await createProductInstanceEdge(design.id, { fromInstanceId: panel0Instance.id, toInstanceId: backSheetInstance.id, edgeType: "REQUIRES" });
+    await createProductInstanceEdge(design.id, {
+      fromInstanceId: panel0Instance.id,
+      toInstanceId: backSheetInstance.id,
+      edgeType: "REQUIRES",
+      origin: "CATALOG_DERIVED",
+    });
     await createProductInstanceEdge(design.id, { fromInstanceId: panel0Instance.id, toInstanceId: connectorInstance.id, edgeType: "REQUIRES" });
     await createProductInstanceEdge(design.id, { fromInstanceId: panel1Instance.id, toInstanceId: backSheetInstance.id, edgeType: "REQUIRES" });
     await createProductInstanceEdge(design.id, { fromInstanceId: panel1Instance.id, toInstanceId: connectorInstance.id, edgeType: "REQUIRES" });

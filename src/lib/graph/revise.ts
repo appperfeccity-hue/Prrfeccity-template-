@@ -173,6 +173,7 @@ export async function reviseTemplate(templateId: string) {
           toInstanceId: instanceIdMap.get(edge.toInstanceId)!,
           edgeType: edge.edgeType,
           sourceSkuEdgeId: edge.sourceSkuEdgeId,
+          origin: edge.origin,
         },
       });
     }
@@ -190,6 +191,7 @@ export async function reviseTemplate(templateId: string) {
           relationshipType: rel.relationshipType,
           condition: rel.condition as Prisma.InputJsonValue | undefined,
           quantityRule: rel.quantityRule as Prisma.InputJsonValue | undefined,
+          origin: rel.origin,
         },
       });
     }

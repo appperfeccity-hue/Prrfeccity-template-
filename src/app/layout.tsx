@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { QueryProvider } from "@/lib/query-provider";
+import { ToastProvider } from "@/lib/toast";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,16 +25,18 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body>
         <QueryProvider>
-          <header className="topnav">
-            <Link href="/" className="topnav-brand">
-              Designer Canvas
-            </Link>
-            <nav>
-              <Link href="/">Designs</Link>
-              <Link href="/library">Design Library</Link>
-            </nav>
-          </header>
-          <main className="app-main">{children}</main>
+          <ToastProvider>
+            <header className="topnav">
+              <Link href="/" className="topnav-brand">
+                Designer Canvas
+              </Link>
+              <nav>
+                <Link href="/">Designs</Link>
+                <Link href="/library">Design Library</Link>
+              </nav>
+            </header>
+            <main className="app-main">{children}</main>
+          </ToastProvider>
         </QueryProvider>
       </body>
     </html>

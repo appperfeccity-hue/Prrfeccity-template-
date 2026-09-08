@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { useState } from "react";
 import dynamic from "next/dynamic";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
@@ -12,8 +12,7 @@ const FurnitureCanvas = dynamic(
   { ssr: false },
 );
 
-export default function FurniturePage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export function FurnitureSection({ designId: id }: { designId: string }) {
   const queryClient = useQueryClient();
   const { pushAction } = useUndoRedo();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });

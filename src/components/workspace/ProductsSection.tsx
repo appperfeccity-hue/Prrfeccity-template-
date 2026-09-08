@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type FullDesign } from "@/lib/api/client";
 import { useUndoRedo } from "@/lib/undo-redo";
@@ -17,8 +17,7 @@ const SKU_EDGE_TYPES = [
   "INSTALLED_WITH",
 ];
 
-export default function ProductsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export function ProductsSection({ designId: id }: { designId: string }) {
   const queryClient = useQueryClient();
   const { pushAction } = useUndoRedo();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });

@@ -1,12 +1,10 @@
 "use client";
 
-import { use } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import { LiveSummaryStrip } from "@/components/layout/LiveSummaryStrip";
 
-export default function ValidatePage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export function ValidateSection({ designId: id }: { designId: string }) {
   const queryClient = useQueryClient();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
 
@@ -72,7 +70,7 @@ export default function ValidatePage({ params }: { params: Promise<{ id: string 
       )}
 
       {latest && issues.length === 0 && <p>No issues found — this design is ready for a Master BOM.</p>}
-      {!latest && <p style={{ color: "#888" }}>Run validation to check the design's graph integrity.</p>}
+      {!latest && <p style={{ color: "#888" }}>Run validation to check the design&apos;s graph integrity.</p>}
     </div>
   );
 }

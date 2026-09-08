@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, Fragment } from "react";
+import { useState, Fragment } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import { LiveSummaryStrip } from "@/components/layout/LiveSummaryStrip";
@@ -22,8 +22,7 @@ function provenanceLabel(line: BomLine) {
   return "unknown";
 }
 
-export default function BomPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export function BomSection({ designId: id }: { designId: string }) {
   const queryClient = useQueryClient();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
   const skusQuery = useQuery({ queryKey: ["skus"], queryFn: () => api.listSkus() });

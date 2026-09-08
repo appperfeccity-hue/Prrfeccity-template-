@@ -1,16 +1,15 @@
 "use client";
 
-import { use, useState } from "react";
 import dynamic from "next/dynamic";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "@/lib/api/client";
 
 const WallCanvas = dynamic(() => import("@/components/canvas/WallCanvas").then((m) => m.WallCanvas), {
   ssr: false,
 });
 
-export default function WallPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export function WallSection({ designId: id }: { designId: string }) {
   const queryClient = useQueryClient();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
 

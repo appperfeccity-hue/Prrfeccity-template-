@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { useState } from "react";
 import dynamic from "next/dynamic";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
@@ -25,8 +25,7 @@ const ZoneCanvas = dynamic(() => import("@/components/canvas/ZoneCanvas").then((
   ssr: false,
 });
 
-export default function ZonesPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export function ZonesSection({ designId: id }: { designId: string }) {
   const queryClient = useQueryClient();
   const { pushAction } = useUndoRedo();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
@@ -488,7 +487,7 @@ export default function ZonesPage({ params }: { params: Promise<{ id: string }> 
             Add Panel
           </button>
         </div>
-        <p style={{ color: "#888", fontSize: 13 }}>Click a panel's edge line on the canvas above to flag it (trim / connector / termination / lighting).</p>
+        <p style={{ color: "#888", fontSize: 13 }}>Click a panel&apos;s edge line on the canvas above to flag it (trim / connector / termination / lighting).</p>
         {allPartitions.flatMap((p) => panelsForPartition(p.id)).map((panel) => (
           <div key={panel.id} className="form-row" style={{ borderTop: "1px solid #eee", paddingTop: 8, marginTop: 8 }}>
             <div className="field">

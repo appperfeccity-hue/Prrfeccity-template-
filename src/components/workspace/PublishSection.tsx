@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type FullDesign, type Look, type LibraryRoomTypeValue } from "@/lib/api/client";
@@ -77,8 +77,7 @@ function LibraryListingForm({ id, design, looks }: { id: string; design: FullDes
   );
 }
 
-export default function PublishPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export function PublishSection({ designId: id }: { designId: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
@@ -99,7 +98,7 @@ export default function PublishPage({ params }: { params: Promise<{ id: string }
     mutationFn: () => api.reviseDesign(id),
     onSuccess: (child) => {
       queryClient.invalidateQueries({ queryKey: ["designs"] });
-      router.push(`/designs/${child.id}/wall`);
+      router.push(`/designs/${child.id}/design`);
     },
   });
 

@@ -1,6 +1,19 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens for the Phase 4 Canvas-primary redesign (UI-M1).
+ * New components (DesignStage, CommandHeader, Inspector, etc.) are built
+ * with Tailwind utilities against these tokens via @theme below. Existing
+ * hand-rolled classes (.card/.btn/.field/...) below are left untouched and
+ * keep serving pages not yet migrated -- see the Phase 4 plan's "no
+ * big-bang rewrite" strategy.
+ */
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --accent: #2563eb;
+  --radius-md: 10px;
+  --radius-lg: 12px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -8,6 +21,14 @@
     --background: #0a0a0a;
     --foreground: #ededed;
   }
+}
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --radius-token-md: var(--radius-md);
+  --radius-token-lg: var(--radius-lg);
 }
 
 html {

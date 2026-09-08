@@ -113,7 +113,7 @@ export default function LibraryPage() {
       >
         {designs.map((design) => (
           <div key={design.id} style={{ position: "relative" }}>
-            <a href={`/designs/${design.id}/bom`} style={{ display: "block" }}>
+            <a href={`/designs/${design.id}/review`} style={{ display: "block" }}>
               <div
                 style={{
                   width: "100%",

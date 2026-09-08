@@ -50,7 +50,7 @@ export default function DesignsPage() {
             <span className="badge">{design.status}</span>{" "}
             <span style={{ color: "#888", fontSize: 13 }}>v{design.version}</span>
           </div>
-          <Link className="btn btn-secondary" href={`/designs/${design.id}/wall`}>
+          <Link className="btn btn-secondary" href={`/designs/${design.id}/design`}>
             Open
           </Link>
         </div>

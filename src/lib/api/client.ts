@@ -1,4 +1,5 @@
 import type {
+  CategoryModel as Category,
   DesignModel as Design,
   DesignValidationResultModel as DesignValidationResult,
   GeometryEdgeModel as GeometryEdge,
@@ -32,16 +33,30 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return json as T;
 }
 
+export type SkuWithCategory = SkuMaster & { category: Category };
+
 export type FullDesign = Design & {
   geometryNodes: (GeometryNode & { wall: Wall | null; zone: Zone | null; partition: ZonePartition | null; panel: Panel | null; edges: GeometryEdge[] })[];
   geometryEdgeRelationships: GeometryEdgeRelationship[];
-  productInstances: (ProductInstance & { sku: SkuMaster })[];
+  productInstances: (ProductInstance & { sku: SkuWithCategory })[];
   productInstanceEdges: ProductInstanceEdge[];
   geometryProductRelationships: GeometryProductRelationship[];
   templateParameters: (TemplateParameter & { permission: ConsultantPermission | null })[];
   validationResults: DesignValidationResult[];
   masterBoms: (MasterBom & { lines: unknown[] })[];
 };
+
+export type GeometryEdgeRelationshipTypeValue =
+  | "ADJACENT_TO"
+  | "MEETS"
+  | "CONTINUES_TO"
+  | "SHARES_BOUNDARY"
+  | "TERMINATES_AT";
+
+export type QuantityRule =
+  | { type: "FIXED"; value: number }
+  | { type: "PER_LENGTH_MM"; perMm: number }
+  | null;
 
 export const api = {
   listDesigns: () => request<Design[]>("GET", "/designs"),
@@ -69,10 +84,16 @@ export const api = {
     },
   ) => request<{ zone: Zone; edges: GeometryEdge[] }>("POST", `/designs/${id}/zones`, data),
 
+  deleteZone: (id: string, zoneId: string) =>
+    request<void>("DELETE", `/designs/${id}/zones/${zoneId}`),
+
   createGeometryEdgeRelationship: (
     id: string,
-    data: { edgeAId: string; edgeBId: string; relationshipType: "ADJACENCY" },
+    data: { edgeAId: string; edgeBId: string; relationshipType: GeometryEdgeRelationshipTypeValue },
   ) => request<GeometryEdgeRelationship>("POST", `/designs/${id}/geometry-edge-relationships`, data),
+
+  deleteGeometryEdgeRelationship: (id: string, relationshipId: string) =>
+    request<void>("DELETE", `/designs/${id}/geometry-edge-relationships/${relationshipId}`),
 
   updateGeometryEdge: (
     id: string,
@@ -94,13 +115,30 @@ export const api = {
     data: { orderIndex: number; widthMm: number; heightMm: number; orientation: string },
   ) => request<{ panel: Panel; edges: GeometryEdge[] }>("POST", `/designs/${id}/partitions/${partitionId}/panels`, data),
 
+  updatePanel: (id: string, panelId: string, data: { widthMm?: number; orientation?: string }) =>
+    request<Panel>("PATCH", `/designs/${id}/panels/${panelId}`, data),
+
+  autoFillPartition: (id: string, partitionId: string, skuId: string) =>
+    request<{
+      partition: ZonePartition;
+      panels: { panel: Panel; edges: GeometryEdge[]; productInstance: ProductInstance | null }[];
+      fill: { count: number; panelWidthMm: number; remainderMm: number; hasOffcut: boolean; offcutReusable: boolean | null };
+    }>("POST", `/designs/${id}/partitions/${partitionId}/autofill`, { skuId }),
+
+  deleteGeometryNode: (id: string, nodeId: string) =>
+    request<void>("DELETE", `/designs/${id}/geometry-nodes/${nodeId}`),
+
+  listCategories: () => request<Category[]>("GET", "/categories"),
+
   listSkus: (category?: string) =>
-    request<SkuMaster[]>("GET", `/skus${category ? `?category=${category}` : ""}`),
+    request<SkuWithCategory[]>("GET", `/skus${category ? `?category=${category}` : ""}`),
   getSku: (skuId: string) =>
-    request<SkuMaster & { edgesFrom: (SkuEdge & { toSku: SkuMaster })[]; edgesTo: (SkuEdge & { fromSku: SkuMaster })[] }>(
-      "GET",
-      `/skus/${skuId}`,
-    ),
+    request<
+      SkuWithCategory & {
+        edgesFrom: (SkuEdge & { toSku: SkuWithCategory })[];
+        edgesTo: (SkuEdge & { fromSku: SkuWithCategory })[];
+      }
+    >("GET", `/skus/${skuId}`),
 
   createProductInstance: (
     id: string,
@@ -115,6 +153,15 @@ export const api = {
     },
   ) => request<ProductInstance>("POST", `/designs/${id}/product-instances`, data),
 
+  updateProductInstance: (
+    id: string,
+    instanceId: string,
+    data: { x?: number; y?: number; z?: number; rotationDeg?: number; quantity?: number },
+  ) => request<ProductInstance>("PATCH", `/designs/${id}/product-instances/${instanceId}`, data),
+
+  deleteProductInstance: (id: string, instanceId: string) =>
+    request<void>("DELETE", `/designs/${id}/product-instances/${instanceId}`),
+
   createGeometryProductRelationship: (
     id: string,
     data: {
@@ -122,13 +169,21 @@ export const api = {
       geometryNodeId?: string;
       productInstanceId: string;
       relationshipType: string;
+      condition?: unknown;
+      quantityRule?: QuantityRule;
     },
   ) => request<GeometryProductRelationship>("POST", `/designs/${id}/geometry-product-relationships`, data),
+
+  deleteGeometryProductRelationship: (id: string, relationshipId: string) =>
+    request<void>("DELETE", `/designs/${id}/geometry-product-relationships/${relationshipId}`),
 
   createProductInstanceEdge: (
     id: string,
     data: { fromInstanceId: string; toInstanceId: string; edgeType: string; sourceSkuEdgeId?: string },
   ) => request<ProductInstanceEdge>("POST", `/designs/${id}/product-instance-edges`, data),
+
+  deleteProductInstanceEdge: (id: string, edgeId: string) =>
+    request<void>("DELETE", `/designs/${id}/product-instance-edges/${edgeId}`),
 
   createTemplateParameter: (
     id: string,
@@ -142,6 +197,9 @@ export const api = {
       unit?: string;
     },
   ) => request<TemplateParameter>("POST", `/designs/${id}/parameters`, data),
+
+  deleteTemplateParameter: (id: string, paramId: string) =>
+    request<void>("DELETE", `/designs/${id}/parameters/${paramId}`),
 
   setPermission: (
     id: string,

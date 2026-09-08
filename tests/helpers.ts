@@ -11,7 +11,11 @@ async function skuIdByCode(code: string) {
   return sku.id;
 }
 
-async function skuEdgeId(fromCode: string, toCode: string, edgeType: "REQUIRES" | "TERMINATES" | "SUPPORTS" | "CONNECTS" | "INTERACTS") {
+async function skuEdgeId(
+  fromCode: string,
+  toCode: string,
+  edgeType: "REQUIRES" | "TERMINATES_WITH" | "SUPPORTS" | "CONNECTS_TO" | "COMPATIBLE_WITH" | "INTERACTS_WITH" | "INSTALLED_WITH",
+) {
   const fromSkuId = await skuIdByCode(fromCode);
   const toSkuId = await skuIdByCode(toCode);
   const edge = await prisma.skuEdge.findFirstOrThrow({ where: { fromSkuId, toSkuId, edgeType } });

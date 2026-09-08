@@ -3,20 +3,32 @@
 import { use, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
+import { useUndoRedo } from "@/lib/undo-redo";
 
-const CATEGORIES = ["PRIMARY", "STRUCTURAL", "CONNECTION", "DECORATIVE", "FUNCTIONAL", "INSTALLATION"];
 const RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOUNDARY_OF", "POSITIONED_AT", "ADJACENT_TO"];
+const SKU_EDGE_TYPES = [
+  "REQUIRES",
+  "CONNECTS_TO",
+  "TERMINATES_WITH",
+  "SUPPORTS",
+  "COMPATIBLE_WITH",
+  "INTERACTS_WITH",
+  "INSTALLED_WITH",
+];
 
 export default function ProductsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const queryClient = useQueryClient();
+  const { pushAction } = useUndoRedo();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
   const skusQuery = useQuery({ queryKey: ["skus"], queryFn: () => api.listSkus() });
+  const categoriesQuery = useQuery({ queryKey: ["categories"], queryFn: () => api.listCategories() });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["design", id] });
   const design = designQuery.data;
-  const skus = skusQuery.data?.filter((s) => s.category !== "FURNITURE") ?? [];
-  const instances = design?.productInstances.filter((pi) => pi.sku?.category !== "FURNITURE") ?? [];
+  const categories = (categoriesQuery.data ?? []).filter((c) => c.key !== "FURNITURE");
+  const skus = skusQuery.data?.filter((s) => s.category.key !== "FURNITURE") ?? [];
+  const instances = design?.productInstances.filter((pi) => pi.sku?.category.key !== "FURNITURE") ?? [];
 
   const flagSummary = (e: { requiresTermination: boolean; requiresConnector: boolean; requiresTrim: boolean; isLightingBoundary: boolean }) =>
     [
@@ -46,25 +58,53 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
   const [z, setZ] = useState<number | "">("");
 
   const placeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (input: { skuId: string; z: number | undefined; targetKey: string; relationshipType: string }) => {
       const instance = await api.createProductInstance(id, {
-        skuId: selectedSkuId,
-        z: z === "" ? undefined : Number(z),
+        skuId: input.skuId,
+        z: input.z,
       });
-      if (targetKey) {
-        const [kind, targetId] = targetKey.split(":");
-        await api.createGeometryProductRelationship(id, {
+      let relationshipId: string | null = null;
+      if (input.targetKey) {
+        const [kind, targetId] = input.targetKey.split(":");
+        const relationship = await api.createGeometryProductRelationship(id, {
           geometryEdgeId: kind === "edge" ? targetId : undefined,
           geometryNodeId: kind === "node" ? targetId : undefined,
           productInstanceId: instance.id,
-          relationshipType,
+          relationshipType: input.relationshipType,
         });
+        relationshipId = relationship.id;
       }
-      return instance;
+      return { instance, relationshipId };
     },
-    onSuccess: () => {
+    onSuccess: (result, input) => {
       setTargetKey("");
       invalidate();
+      let currentInstanceId = result.instance.id;
+      let currentRelationshipId = result.relationshipId;
+      pushAction({
+        description: `Place product`,
+        undo: async () => {
+          if (currentRelationshipId) await api.deleteGeometryProductRelationship(id, currentRelationshipId);
+          await api.deleteProductInstance(id, currentInstanceId);
+          invalidate();
+        },
+        redo: async () => {
+          const instance = await api.createProductInstance(id, { skuId: input.skuId, z: input.z });
+          currentInstanceId = instance.id;
+          currentRelationshipId = null;
+          if (input.targetKey) {
+            const [kind, targetId] = input.targetKey.split(":");
+            const relationship = await api.createGeometryProductRelationship(id, {
+              geometryEdgeId: kind === "edge" ? targetId : undefined,
+              geometryNodeId: kind === "node" ? targetId : undefined,
+              productInstanceId: instance.id,
+              relationshipType: input.relationshipType,
+            });
+            currentRelationshipId = relationship.id;
+          }
+          invalidate();
+        },
+      });
     },
   });
 
@@ -80,19 +120,24 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
   });
 
   const linkInstancesMutation = useMutation({
-    mutationFn: () => {
-      const toInstance = instances.find((i) => i.id === toInstanceId);
-      const sourceSkuEdge = skuDetailQuery.data?.edgesFrom.find(
-        (e) => e.edgeType === edgeType && e.toSkuId === toInstance?.skuId,
-      );
-      return api.createProductInstanceEdge(id, {
-        fromInstanceId,
-        toInstanceId,
-        edgeType,
-        sourceSkuEdgeId: sourceSkuEdge?.id,
+    mutationFn: (input: Parameters<typeof api.createProductInstanceEdge>[1]) =>
+      api.createProductInstanceEdge(id, input),
+    onSuccess: (result, input) => {
+      invalidate();
+      let currentId = result.id;
+      pushAction({
+        description: `Link product edge (${input.edgeType})`,
+        undo: async () => {
+          await api.deleteProductInstanceEdge(id, currentId);
+          invalidate();
+        },
+        redo: async () => {
+          const r = await api.createProductInstanceEdge(id, input);
+          currentId = r.id;
+          invalidate();
+        },
       });
     },
-    onSuccess: invalidate,
   });
 
   return (
@@ -104,9 +149,9 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
             <label>SKU</label>
             <select value={selectedSkuId} onChange={(e) => setSelectedSkuId(e.target.value)}>
               <option value="">Select SKU…</option>
-              {CATEGORIES.map((cat) => (
-                <optgroup key={cat} label={cat}>
-                  {skus.filter((s) => s.category === cat).map((s) => (
+              {categories.map((cat) => (
+                <optgroup key={cat.id} label={cat.label}>
+                  {skus.filter((s) => s.categoryId === cat.id).map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.code} — {s.name}
                     </option>
@@ -153,7 +198,18 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
               </select>
             </div>
           )}
-          <button className="btn" disabled={!selectedSkuId || placeMutation.isPending} onClick={() => placeMutation.mutate()}>
+          <button
+            className="btn"
+            disabled={!selectedSkuId || placeMutation.isPending}
+            onClick={() =>
+              placeMutation.mutate({
+                skuId: selectedSkuId,
+                z: z === "" ? undefined : Number(z),
+                targetKey,
+                relationshipType,
+              })
+            }
+          >
             Place Product
           </button>
         </div>
@@ -170,6 +226,7 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
               <th>Qty</th>
               <th>Z</th>
               <th>Relationships</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -178,10 +235,21 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
               return (
                 <tr key={inst.id}>
                   <td>{inst.sku?.code}</td>
-                  <td>{inst.sku?.category}</td>
+                  <td>{inst.sku?.category.label}</td>
                   <td>{inst.quantity}</td>
                   <td>{inst.z ?? "—"}</td>
                   <td>{rels.length ? rels.map((r) => r.relationshipType).join(", ") : "none"}</td>
+                  <td>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        if (!confirm("Delete this product? This cannot be undone.")) return;
+                        api.deleteProductInstance(id, inst.id).then(invalidate);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               );
             })}
@@ -208,7 +276,7 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
             <div className="field">
               <label>Edge Type</label>
               <select value={edgeType} onChange={(e) => setEdgeType(e.target.value)}>
-                {["REQUIRES", "CONNECTS", "TERMINATES", "SUPPORTS", "INTERACTS"].map((t) => (
+                {SKU_EDGE_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
@@ -229,7 +297,18 @@ export default function ProductsPage({ params }: { params: Promise<{ id: string 
             <button
               className="btn"
               disabled={!fromInstanceId || !toInstanceId || linkInstancesMutation.isPending}
-              onClick={() => linkInstancesMutation.mutate()}
+              onClick={() => {
+                const toInstance = instances.find((i) => i.id === toInstanceId);
+                const sourceSkuEdge = skuDetailQuery.data?.edgesFrom.find(
+                  (e) => e.edgeType === edgeType && e.toSkuId === toInstance?.skuId,
+                );
+                linkInstancesMutation.mutate({
+                  fromInstanceId,
+                  toInstanceId,
+                  edgeType,
+                  sourceSkuEdgeId: sourceSkuEdge?.id,
+                });
+              }}
             >
               Link
             </button>

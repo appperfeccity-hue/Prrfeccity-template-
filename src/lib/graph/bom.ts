@@ -1,6 +1,37 @@
 import { prisma } from "@/lib/prisma";
 import { conflict } from "@/lib/api/errors";
 
+type QuantityRule = { type: "FIXED"; value: number } | { type: "PER_LENGTH_MM"; perMm: number };
+
+type QuantityTargetNode = {
+  wall: { lengthMm: number } | null;
+  zone: { widthMm: number } | null;
+  partition: { widthMm: number } | null;
+  panel: { widthMm: number } | null;
+} | null;
+
+function resolveQuantity(rel: {
+  quantityRule: unknown;
+  productInstance: { quantity: number };
+  geometryNode: QuantityTargetNode;
+  geometryEdge: { node: QuantityTargetNode } | null;
+}): number {
+  const rule = rel.quantityRule as QuantityRule | null;
+  if (!rule) return rel.productInstance.quantity;
+
+  if (rule.type === "FIXED") return rule.value;
+
+  if (rule.type === "PER_LENGTH_MM") {
+    const node = rel.geometryNode ?? rel.geometryEdge?.node ?? null;
+    const lengthMm =
+      node?.wall?.lengthMm ?? node?.zone?.widthMm ?? node?.partition?.widthMm ?? node?.panel?.widthMm ?? null;
+    if (lengthMm != null) return lengthMm * rule.perMm;
+    return rel.productInstance.quantity;
+  }
+
+  return rel.productInstance.quantity;
+}
+
 export async function generateMasterBom(designId: string) {
   const latestValidation = await prisma.designValidationResult.findFirst({
     where: { designId },
@@ -14,7 +45,13 @@ export async function generateMasterBom(designId: string) {
     await Promise.all([
       prisma.geometryProductRelationship.findMany({
         where: { designId },
-        include: { productInstance: { include: { sku: true } } },
+        include: {
+          productInstance: { include: { sku: true } },
+          geometryNode: { include: { wall: true, zone: true, partition: true, panel: true } },
+          geometryEdge: {
+            include: { node: { include: { wall: true, zone: true, partition: true, panel: true } } },
+          },
+        },
       }),
       prisma.productInstanceEdge.findMany({
         where: { designId },
@@ -46,7 +83,7 @@ export async function generateMasterBom(designId: string) {
       ...geometryProductRelationships.map((rel) => ({
         masterBomId: masterBom.id,
         skuId: rel.productInstance.skuId,
-        quantity: rel.productInstance.quantity,
+        quantity: resolveQuantity(rel),
         unitOfMeasure: rel.productInstance.sku.defaultUnit,
         sourceGeometryProductRelationshipId: rel.id,
       })),

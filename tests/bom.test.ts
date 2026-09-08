@@ -78,4 +78,44 @@ describe("generateMasterBom", () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0].id).toBe(second.id);
   });
+
+  it("falls back to productInstance.quantity when quantityRule is null", async () => {
+    const fixture = await buildValidTemplateFixture();
+    designIdToCleanUp = fixture.design.id;
+    await runAndPersistValidation(fixture.design.id);
+
+    const bom = await generateMasterBom(fixture.design.id);
+    const line = bom.lines.find((l) => l.sourceGeometryProductRelationshipId === fixture.relationships.relStructural.id);
+    expect(line?.quantity).toBe(fixture.instances.backSheetInstance.quantity);
+  });
+
+  it("applies a FIXED quantityRule, overriding productInstance.quantity", async () => {
+    const fixture = await buildValidTemplateFixture();
+    designIdToCleanUp = fixture.design.id;
+    await prisma.geometryProductRelationship.update({
+      where: { id: fixture.relationships.relStructural.id },
+      data: { quantityRule: { type: "FIXED", value: 5 } },
+    });
+    await runAndPersistValidation(fixture.design.id);
+
+    const bom = await generateMasterBom(fixture.design.id);
+    const line = bom.lines.find((l) => l.sourceGeometryProductRelationshipId === fixture.relationships.relStructural.id);
+    expect(line?.quantity).toBe(5);
+  });
+
+  it("applies a PER_LENGTH_MM quantityRule against the target panel's widthMm", async () => {
+    const fixture = await buildValidTemplateFixture();
+    designIdToCleanUp = fixture.design.id;
+    // relStructural targets the 1200mm-wide panel node (geometryNodeId), so
+    // 1200mm * 0.01 = 12 should override the instance's placed quantity of 1.
+    await prisma.geometryProductRelationship.update({
+      where: { id: fixture.relationships.relStructural.id },
+      data: { quantityRule: { type: "PER_LENGTH_MM", perMm: 0.01 } },
+    });
+    await runAndPersistValidation(fixture.design.id);
+
+    const bom = await generateMasterBom(fixture.design.id);
+    const line = bom.lines.find((l) => l.sourceGeometryProductRelationshipId === fixture.relationships.relStructural.id);
+    expect(line?.quantity).toBe(12);
+  });
 });

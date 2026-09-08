@@ -25,10 +25,18 @@ export const createZoneSchema = z.object({
 
 export const updateZoneSchema = createZoneSchema.partial();
 
+export const geometryEdgeRelationshipTypes = [
+  "ADJACENT_TO",
+  "MEETS",
+  "CONTINUES_TO",
+  "SHARES_BOUNDARY",
+  "TERMINATES_AT",
+] as const;
+
 export const createGeometryEdgeRelationshipSchema = z.object({
   edgeAId: z.string(),
   edgeBId: z.string(),
-  relationshipType: z.literal("ADJACENCY"),
+  relationshipType: z.enum(geometryEdgeRelationshipTypes),
 });
 
 export const createPartitionSchema = z.object({
@@ -54,6 +62,24 @@ export const createProductInstanceSchema = z.object({
   quantity: z.number().positive().optional(),
 });
 
+export const skuEdgeTypes = [
+  "REQUIRES",
+  "CONNECTS_TO",
+  "TERMINATES_WITH",
+  "SUPPORTS",
+  "COMPATIBLE_WITH",
+  "INTERACTS_WITH",
+  "INSTALLED_WITH",
+] as const;
+
+export const quantityRuleSchema = z
+  .union([
+    z.object({ type: z.literal("FIXED"), value: z.number().positive() }),
+    z.object({ type: z.literal("PER_LENGTH_MM"), perMm: z.number().positive() }),
+  ])
+  .nullable()
+  .optional();
+
 export const createGeometryProductRelationshipSchema = z
   .object({
     geometryEdgeId: z.string().optional(),
@@ -67,6 +93,8 @@ export const createGeometryProductRelationshipSchema = z
       "POSITIONED_AT",
       "ADJACENT_TO",
     ]),
+    condition: z.any().optional(),
+    quantityRule: quantityRuleSchema,
   })
   .refine((v) => Boolean(v.geometryEdgeId) !== Boolean(v.geometryNodeId), {
     message: "Exactly one of geometryEdgeId or geometryNodeId must be set",
@@ -75,7 +103,7 @@ export const createGeometryProductRelationshipSchema = z
 export const createProductInstanceEdgeSchema = z.object({
   fromInstanceId: z.string(),
   toInstanceId: z.string(),
-  edgeType: z.enum(["REQUIRES", "CONNECTS", "TERMINATES", "SUPPORTS", "INTERACTS"]),
+  edgeType: z.enum(skuEdgeTypes),
   sourceSkuEdgeId: z.string().optional(),
 });
 
@@ -101,6 +129,23 @@ export const setConsultantPermissionSchema = z.object({
   minValue: z.number().optional(),
   maxValue: z.number().optional(),
   allowedValues: z.array(z.string()).optional(),
+});
+
+export const autoFillPartitionSchema = z.object({
+  skuId: z.string(),
+});
+
+export const updateProductInstanceSchema = z.object({
+  x: z.number().optional(),
+  y: z.number().optional(),
+  z: z.number().optional(),
+  rotationDeg: z.number().optional(),
+  quantity: z.number().positive().optional(),
+});
+
+export const updatePanelSchema = z.object({
+  widthMm: z.number().positive().optional(),
+  orientation: z.enum(["VERTICAL", "HORIZONTAL"]).optional(),
 });
 
 export const updateEdgeFlagsSchema = z.object({

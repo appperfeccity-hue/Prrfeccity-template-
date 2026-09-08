@@ -87,7 +87,7 @@ async function main() {
   await api("POST", `/api/designs/${designId}/geometry-edge-relationships`, {
     edgeAId: zone1Outer,
     edgeBId: zone2Outer,
-    relationshipType: "ADJACENCY",
+    relationshipType: "ADJACENT_TO",
   });
 
   console.log("  (max-zone-limit check on a throwaway design, so it doesn't pollute the main one)");
@@ -311,6 +311,257 @@ async function main() {
   const listed = library.find((d: { id: string }) => d.id === designId);
   assert(Boolean(listed), "published template appears in the Design Library");
   assert(listed.name === "E2E Template", "listed template has the correct name");
+
+  // 10. Auto-fill
+  console.log("\n10. Auto-fill a partition (drag-and-drop equivalent)");
+  const { json: autoFillDesign } = await api("POST", "/api/designs", { name: "E2E Auto-fill" });
+  const { json: autoFillWall } = await api("PUT", `/api/designs/${autoFillDesign.id}/wall`, {
+    wallType: "STRAIGHT_LTR",
+    lengthMm: 1250,
+    heightMm: 2400,
+  });
+  const { json: autoFillZone } = await api("POST", `/api/designs/${autoFillDesign.id}/zones`, {
+    wallId: autoFillWall.wall.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 1250,
+    heightMm: 2400,
+  });
+  const { json: autoFillPartition } = await api(
+    "POST",
+    `/api/designs/${autoFillDesign.id}/zones/${autoFillZone.zone.id}/partitions`,
+    { orderIndex: 0, widthMm: 1250, heightMm: 2400 },
+  );
+  const panelSkuId = await skuId("SKU-PANEL-600");
+  const { json: fillResult } = await api(
+    "POST",
+    `/api/designs/${autoFillDesign.id}/partitions/${autoFillPartition.id}/autofill`,
+    { skuId: panelSkuId },
+  );
+  assert(fillResult.fill.count === 1, "1250mm/600mm auto-fill reduces count to 1 (avoids a sub-minimum offcut)");
+  assert(fillResult.fill.remainderMm === 650, "remainder is the larger 650mm offcut, not 50mm");
+  assert(fillResult.fill.offcutReusable === true, "650mm offcut is above the 100mm minimum, so it's reusable");
+
+  console.log("  10b. Negative-path: a partition too narrow to reduce further");
+  const { json: negDesign } = await api("POST", "/api/designs", { name: "E2E Auto-fill Sub-minimum" });
+  const { json: negWall } = await api("PUT", `/api/designs/${negDesign.id}/wall`, {
+    wallType: "STRAIGHT_LTR",
+    lengthMm: 650,
+    heightMm: 2400,
+  });
+  const { json: negZone } = await api("POST", `/api/designs/${negDesign.id}/zones`, {
+    wallId: negWall.wall.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 650,
+    heightMm: 2400,
+  });
+  const { json: negPartition } = await api(
+    "POST",
+    `/api/designs/${negDesign.id}/zones/${negZone.zone.id}/partitions`,
+    { orderIndex: 0, widthMm: 650, heightMm: 2400 },
+  );
+  const { json: negFillResult } = await api(
+    "POST",
+    `/api/designs/${negDesign.id}/partitions/${negPartition.id}/autofill`,
+    { skuId: panelSkuId },
+  );
+  assert(negFillResult.fill.count === 1, "650mm/600mm auto-fill can't reduce below 1 panel");
+  assert(negFillResult.fill.offcutReusable === false, "sub-minimum 50mm offcut is flagged non-reusable");
+
+  const { json: negValidation } = await api("POST", `/api/designs/${negDesign.id}/validate`, {});
+  const wasteIssue = negValidation.issues.find((i: { code: string }) => i.code === "PANEL_OFFCUT_WASTE");
+  assert(Boolean(wasteIssue), "validation reports PANEL_OFFCUT_WASTE for the sub-minimum offcut");
+  assert(wasteIssue.severity === "WARNING", "PANEL_OFFCUT_WASTE is a WARNING, not an ERROR");
+
+  console.log("  10c. Rejects auto-fill on a non-empty partition and on a SKU without defaultWidthMm");
+  const { status: nonEmptyStatus } = await api(
+    "POST",
+    `/api/designs/${autoFillDesign.id}/partitions/${autoFillPartition.id}/autofill`,
+    { skuId: panelSkuId },
+  );
+  assert(nonEmptyStatus === 400, "re-auto-filling an already-filled partition is rejected with 400");
+
+  const hardwareSkuId = await skuId("SKU-HW-SCREWKIT-01");
+  const { status: badSkuStatus } = await api(
+    "POST",
+    `/api/designs/${negDesign.id}/partitions/${negPartition.id}/autofill`,
+    { skuId: hardwareSkuId },
+  );
+  assert(badSkuStatus === 400, "auto-filling with a non-PRIMARY SKU is rejected with 400");
+
+  // 11. Move / resize / rotate / delete
+  console.log("\n11. Move/resize/rotate/delete of already-placed instances");
+  const { json: moveDesign } = await api("POST", "/api/designs", { name: "E2E Move/Resize/Rotate" });
+  const { json: moveWall } = await api("PUT", `/api/designs/${moveDesign.id}/wall`, {
+    wallType: "STRAIGHT_LTR",
+    lengthMm: 1200,
+    heightMm: 2400,
+  });
+  const { json: moveZone } = await api("POST", `/api/designs/${moveDesign.id}/zones`, {
+    wallId: moveWall.wall.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 1200,
+    heightMm: 2400,
+  });
+  const { json: movePartition } = await api(
+    "POST",
+    `/api/designs/${moveDesign.id}/zones/${moveZone.zone.id}/partitions`,
+    { orderIndex: 0, widthMm: 1200, heightMm: 2400 },
+  );
+  const { json: movePanelResult } = await api(
+    "POST",
+    `/api/designs/${moveDesign.id}/partitions/${movePartition.id}/panels`,
+    { orderIndex: 0, widthMm: 1200, heightMm: 2400, orientation: "VERTICAL" },
+  );
+  const { json: furnInstance } = await api("POST", `/api/designs/${moveDesign.id}/product-instances`, {
+    skuId: await skuId("SKU-FURN-VANITY-01"),
+    x: 100,
+    y: 100,
+  });
+
+  const { json: movedInstance } = await api(
+    "PATCH",
+    `/api/designs/${moveDesign.id}/product-instances/${furnInstance.id}`,
+    { x: 400, y: 300, rotationDeg: 90 },
+  );
+  assert(movedInstance.x === 400 && movedInstance.y === 300, "PATCH moved the furniture instance");
+  assert(movedInstance.rotationDeg === 90, "PATCH rotated the furniture instance");
+
+  await api("PATCH", `/api/designs/${moveDesign.id}/panels/${movePanelResult.panel.id}`, { widthMm: 700 });
+  const { json: coverageValidation } = await api("POST", `/api/designs/${moveDesign.id}/validate`, {});
+  assert(
+    coverageValidation.issues.some((i: { code: string }) => i.code === "PANEL_COVERAGE"),
+    "resizing a panel without adjusting neighbors now fails PANEL_COVERAGE (no silent auto-repair)",
+  );
+
+  const { status: deleteInstanceStatus } = await api(
+    "DELETE",
+    `/api/designs/${moveDesign.id}/product-instances/${furnInstance.id}`,
+  );
+  assert(deleteInstanceStatus === 204, "DELETE removed the product instance");
+  const { json: designAfterDelete } = await api("GET", `/api/designs/${moveDesign.id}`);
+  assert(
+    !designAfterDelete.productInstances.some((pi: { id: string }) => pi.id === furnInstance.id),
+    "deleted instance is gone from the design (and would be excluded from a regenerated BOM)",
+  );
+
+  const { json: throwawayZone } = await api("POST", `/api/designs/${moveDesign.id}/zones`, {
+    associatesWith: "STRUCTURE",
+    orderIndex: 1,
+    widthMm: 300,
+    heightMm: 2400,
+  });
+  await api("POST", `/api/designs/${moveDesign.id}/zones/${throwawayZone.zone.id}/partitions`, {
+    orderIndex: 0,
+    widthMm: 300,
+    heightMm: 2400,
+  });
+  const { status: deleteZoneStatus } = await api(
+    "DELETE",
+    `/api/designs/${moveDesign.id}/geometry-nodes/${throwawayZone.zone.id}`,
+  );
+  assert(deleteZoneStatus === 204, "DELETE via the generic geometry-nodes route removed the zone");
+  const { json: designAfterZoneDelete } = await api("GET", `/api/designs/${moveDesign.id}`);
+  assert(
+    !designAfterZoneDelete.geometryNodes.some((n: { id: string }) => n.id === throwawayZone.zone.id) &&
+      !designAfterZoneDelete.geometryNodes.some(
+        (n: { nodeType: string; partition?: { zoneId: string } }) =>
+          n.nodeType === "PARTITION" && n.partition?.zoneId === throwawayZone.zone.id,
+      ),
+    "deleting the zone cascaded away its partition too",
+  );
+
+  // 12. Zone relationship types
+  console.log("\n12. Zone relationship types: spatial vs. non-spatial");
+  const { json: relDesign } = await api("POST", "/api/designs", { name: "E2E Zone Relationship Types" });
+  const { json: relWall } = await api("PUT", `/api/designs/${relDesign.id}/wall`, {
+    wallType: "STRAIGHT_LTR",
+    lengthMm: 2000,
+    heightMm: 2400,
+  });
+  const { json: relZoneA } = await api("POST", `/api/designs/${relDesign.id}/zones`, {
+    wallId: relWall.wall.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 1000,
+    heightMm: 2400,
+  });
+  const { json: relZoneB } = await api("POST", `/api/designs/${relDesign.id}/zones`, {
+    wallId: relWall.wall.id,
+    associatesWith: "WALL",
+    orderIndex: 1,
+    widthMm: 1000,
+    heightMm: 2400,
+  });
+  const relEdgeA = relZoneA.edges.find((e: { edgeRole: string }) => e.edgeRole === "OUTER_BOUNDARY").id;
+  const relEdgeB = relZoneB.edges.find((e: { edgeRole: string }) => e.edgeRole === "OUTER_BOUNDARY").id;
+
+  const { json: continuesRel } = await api(
+    "POST",
+    `/api/designs/${relDesign.id}/geometry-edge-relationships`,
+    { edgeAId: relEdgeA, edgeBId: relEdgeB, relationshipType: "CONTINUES_TO" },
+  );
+  const { json: continuesValidation } = await api("POST", `/api/designs/${relDesign.id}/validate`, {});
+  assert(
+    continuesValidation.issues.some((i: { code: string }) => i.code === "ZONE_ADJACENCY_INTEGRITY"),
+    "CONTINUES_TO does not satisfy ZONE_ADJACENCY_INTEGRITY (not spatial adjacency)",
+  );
+
+  await api("DELETE", `/api/designs/${relDesign.id}/geometry-edge-relationships/${continuesRel.id}`);
+  await api("POST", `/api/designs/${relDesign.id}/geometry-edge-relationships`, {
+    edgeAId: relEdgeA,
+    edgeBId: relEdgeB,
+    relationshipType: "MEETS",
+  });
+  const { json: meetsValidation } = await api("POST", `/api/designs/${relDesign.id}/validate`, {});
+  assert(
+    !meetsValidation.issues.some((i: { code: string }) => i.code === "ZONE_ADJACENCY_INTEGRITY"),
+    "MEETS satisfies ZONE_ADJACENCY_INTEGRITY",
+  );
+
+  // 13. quantityRule
+  console.log("\n13. quantityRule PER_LENGTH_MM overrides the BOM line's quantity");
+  const { json: qrDesign } = await api("POST", "/api/designs", { name: "E2E QuantityRule" });
+  const { json: qrWall } = await api("PUT", `/api/designs/${qrDesign.id}/wall`, {
+    wallType: "STRAIGHT_LTR",
+    lengthMm: 600,
+    heightMm: 2400,
+  });
+  const { json: qrZone } = await api("POST", `/api/designs/${qrDesign.id}/zones`, {
+    wallId: qrWall.wall.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 600,
+    heightMm: 2400,
+  });
+  const { json: qrPartition } = await api(
+    "POST",
+    `/api/designs/${qrDesign.id}/zones/${qrZone.zone.id}/partitions`,
+    { orderIndex: 0, widthMm: 600, heightMm: 2400 },
+  );
+  const { json: qrPanelResult } = await api(
+    "POST",
+    `/api/designs/${qrDesign.id}/partitions/${qrPartition.id}/panels`,
+    { orderIndex: 0, widthMm: 600, heightMm: 2400, orientation: "VERTICAL" },
+  );
+  const { json: qrStructInstance } = await api("POST", `/api/designs/${qrDesign.id}/product-instances`, {
+    skuId: await skuId("SKU-PVC-BACK-01"),
+  });
+  const { json: qrRel } = await api("POST", `/api/designs/${qrDesign.id}/geometry-product-relationships`, {
+    geometryNodeId: qrPanelResult.panel.id,
+    productInstanceId: qrStructInstance.id,
+    relationshipType: "BOUNDARY_OF",
+    quantityRule: { type: "PER_LENGTH_MM", perMm: 0.01 },
+  });
+  await api("POST", `/api/designs/${qrDesign.id}/validate`, {});
+  const { json: qrBom } = await api("POST", `/api/designs/${qrDesign.id}/bom`, {});
+  const qrLine = qrBom.lines.find(
+    (l: { sourceGeometryProductRelationshipId: string | null }) => l.sourceGeometryProductRelationshipId === qrRel.id,
+  );
+  assert(Boolean(qrLine), "quantityRule relationship produced a BOM line");
+  assert(qrLine.quantity === 6, "PER_LENGTH_MM (600mm * 0.01) overrides quantity to 6, not the placed quantity of 1");
 
   console.log(`\nAll ${assertions} assertions passed.`);
 }

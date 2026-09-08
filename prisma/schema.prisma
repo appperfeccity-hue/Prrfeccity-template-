@@ -145,15 +145,17 @@ enum PanelOrientation {
 }
 
 model Panel {
-  id          String           @id
-  node        GeometryNode     @relation(fields: [id], references: [id], onDelete: Cascade)
-  designId    String
-  partitionId String
-  partition   ZonePartition    @relation(fields: [partitionId], references: [id], onDelete: Cascade)
-  orderIndex  Int
-  widthMm     Float
-  heightMm    Float
-  orientation PanelOrientation
+  id             String           @id
+  node           GeometryNode     @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId       String
+  partitionId    String
+  partition      ZonePartition    @relation(fields: [partitionId], references: [id], onDelete: Cascade)
+  orderIndex     Int
+  widthMm        Float
+  heightMm       Float
+  orientation    PanelOrientation
+  isOffcut       Boolean          @default(false)
+  offcutReusable Boolean?
 }
 
 enum GeometryEdgeRole {
@@ -190,7 +192,11 @@ model GeometryEdge {
 }
 
 enum GeometryEdgeRelationshipType {
-  ADJACENCY
+  ADJACENT_TO
+  MEETS
+  CONTINUES_TO
+  SHARES_BOUNDARY
+  TERMINATES_AT
 }
 
 // Models edge-to-edge relationships explicitly (e.g. Zone A's right boundary edge
@@ -215,36 +221,42 @@ model GeometryEdgeRelationship {
 // Product graph (SKU Master = catalog truth)
 // ---------------------------------------------------------------------------
 
-enum SkuCategory {
-  PRIMARY
-  STRUCTURAL
-  CONNECTION
-  DECORATIVE
-  FUNCTIONAL
-  INSTALLATION
-  FURNITURE
+// Category is a first-class entity (not a bare enum) so the SKU Master's
+// category vocabulary is dynamic catalog data, not a compile-time constant.
+model Category {
+  id    String @id @default(cuid())
+  key   String @unique
+  label String
+
+  skus SkuMaster[]
 }
 
 model SkuMaster {
-  id             String      @id @default(cuid())
-  code           String      @unique
+  id             String   @id @default(cuid())
+  code           String   @unique
   name           String
-  category       SkuCategory
+  categoryId     String
+  category       Category @relation(fields: [categoryId], references: [id])
   defaultWidthMm Float?
-  defaultUnit    String      @default("EA")
+  defaultUnit    String   @default("EA")
+  minCutPieceMm  Float?
   attributes     Json?
 
   edgesFrom        SkuEdge[]         @relation("SkuEdgeFrom")
   edgesTo          SkuEdge[]         @relation("SkuEdgeTo")
   productInstances ProductInstance[]
+
+  @@index([categoryId])
 }
 
 enum SkuEdgeType {
   REQUIRES
-  CONNECTS
-  TERMINATES
+  CONNECTS_TO
+  TERMINATES_WITH
   SUPPORTS
-  INTERACTS
+  COMPATIBLE_WITH
+  INTERACTS_WITH
+  INSTALLED_WITH
 }
 
 // Catalog-level truth: "PANEL-600 REQUIRES PVC-BACK-01". The Canvas only
@@ -331,6 +343,12 @@ model GeometryProductRelationship {
   productInstanceId String
   productInstance   ProductInstance                 @relation(fields: [productInstanceId], references: [id], onDelete: Cascade)
   relationshipType  GeometryProductRelationshipType
+  // Documentation-only this pass: stored/displayed, not interpreted by any
+  // algorithm. A future Consultant/Physical Engine/Resolver can evaluate it.
+  condition         Json?
+  // { "type": "FIXED", "value": n } | { "type": "PER_LENGTH_MM", "perMm": n } | null.
+  // Drives resolveQuantity() in bom.ts; null falls back to productInstance.quantity.
+  quantityRule      Json?
 
   masterBomLines MasterBomLine[] @relation("BomLineFromRelationship")
 

@@ -78,7 +78,7 @@ export default function BomPage({ params }: { params: Promise<{ id: string }> })
                   <Fragment key={skuId}>
                     <tr>
                       <td>{sku?.code ?? skuId}</td>
-                      <td>{sku?.category}</td>
+                      <td>{sku?.category.label}</td>
                       <td>{totalQty}</td>
                       <td>{lines[0].unitOfMeasure}</td>
                       <td>

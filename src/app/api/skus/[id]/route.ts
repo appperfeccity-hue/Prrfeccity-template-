@@ -11,6 +11,7 @@ export async function GET(
     const sku = await prisma.skuMaster.findUnique({
       where: { id },
       include: {
+        category: true,
         edgesFrom: { include: { toSku: true } },
         edgesTo: { include: { fromSku: true } },
       },

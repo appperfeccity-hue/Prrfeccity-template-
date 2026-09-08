@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { badRequest } from "@/lib/api/errors";
-import type { GeometryProductRelationshipType, SkuEdgeType } from "@/generated/prisma/client";
+import type {
+  GeometryProductRelationshipType,
+  Prisma,
+  SkuEdgeType,
+} from "@/generated/prisma/client";
 
 export async function createProductInstance(
   designId: string,
@@ -28,6 +32,20 @@ export async function createProductInstance(
   });
 }
 
+export async function updateProductInstance(
+  instanceId: string,
+  input: { x?: number; y?: number; z?: number; rotationDeg?: number; quantity?: number },
+) {
+  return prisma.productInstance.update({
+    where: { id: instanceId },
+    data: input,
+  });
+}
+
+export async function deleteProductInstance(instanceId: string) {
+  await prisma.productInstance.delete({ where: { id: instanceId } });
+}
+
 export async function createGeometryProductRelationship(
   designId: string,
   input: {
@@ -35,6 +53,8 @@ export async function createGeometryProductRelationship(
     geometryNodeId?: string | null;
     productInstanceId: string;
     relationshipType: GeometryProductRelationshipType;
+    condition?: unknown;
+    quantityRule?: unknown;
   },
 ) {
   const hasEdge = Boolean(input.geometryEdgeId);
@@ -50,8 +70,14 @@ export async function createGeometryProductRelationship(
       geometryNodeId: input.geometryNodeId ?? null,
       productInstanceId: input.productInstanceId,
       relationshipType: input.relationshipType,
+      condition: input.condition as Prisma.InputJsonValue | undefined,
+      quantityRule: input.quantityRule as Prisma.InputJsonValue | undefined,
     },
   });
+}
+
+export async function deleteGeometryProductRelationship(relationshipId: string) {
+  await prisma.geometryProductRelationship.delete({ where: { id: relationshipId } });
 }
 
 export async function createProductInstanceEdge(
@@ -72,4 +98,8 @@ export async function createProductInstanceEdge(
       sourceSkuEdgeId: input.sourceSkuEdgeId ?? null,
     },
   });
+}
+
+export async function deleteProductInstanceEdge(edgeId: string) {
+  await prisma.productInstanceEdge.delete({ where: { id: edgeId } });
 }

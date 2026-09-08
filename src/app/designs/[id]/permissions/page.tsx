@@ -3,10 +3,12 @@
 import { use, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type FullDesign } from "@/lib/api/client";
+import { useUndoRedo } from "@/lib/undo-redo";
 
 export default function PermissionsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const queryClient = useQueryClient();
+  const { pushAction } = useUndoRedo();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["design", id] });
 
@@ -20,16 +22,23 @@ export default function PermissionsPage({ params }: { params: Promise<{ id: stri
   const [targetInstanceId, setTargetInstanceId] = useState("");
 
   const createParamMutation = useMutation({
-    mutationFn: () =>
-      api.createTemplateParameter(id, {
-        paramKey,
-        paramType: "NUMERIC_RANGE",
-        label,
-        defaultValue,
-        unit,
-        targetProductInstanceId: targetInstanceId || undefined,
-      }),
-    onSuccess: invalidate,
+    mutationFn: (input: Parameters<typeof api.createTemplateParameter>[1]) => api.createTemplateParameter(id, input),
+    onSuccess: (result, input) => {
+      invalidate();
+      let currentId = result.id;
+      pushAction({
+        description: `Add parameter ${input.paramKey}`,
+        undo: async () => {
+          await api.deleteTemplateParameter(id, currentId);
+          invalidate();
+        },
+        redo: async () => {
+          const r = await api.createTemplateParameter(id, input);
+          currentId = r.id;
+          invalidate();
+        },
+      });
+    },
   });
 
   return (
@@ -64,7 +73,20 @@ export default function PermissionsPage({ params }: { params: Promise<{ id: stri
               ))}
             </select>
           </div>
-          <button className="btn" disabled={!paramKey || createParamMutation.isPending} onClick={() => createParamMutation.mutate()}>
+          <button
+            className="btn"
+            disabled={!paramKey || createParamMutation.isPending}
+            onClick={() =>
+              createParamMutation.mutate({
+                paramKey,
+                paramType: "NUMERIC_RANGE",
+                label,
+                defaultValue,
+                unit,
+                targetProductInstanceId: targetInstanceId || undefined,
+              })
+            }
+          >
             Add Parameter
           </button>
         </div>
@@ -93,15 +115,29 @@ function PermissionRow({
   const [editable, setEditable] = useState(param.permission?.editableByConsultant ?? false);
   const [min, setMin] = useState(param.permission?.minValue?.toString() ?? "");
   const [max, setMax] = useState(param.permission?.maxValue?.toString() ?? "");
+  const { pushAction } = useUndoRedo();
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api.setPermission(designId, param.id, {
-        editableByConsultant: editable,
-        minValue: min === "" ? undefined : Number(min),
-        maxValue: max === "" ? undefined : Number(max),
-      }),
-    onSuccess: onSaved,
+    mutationFn: (data: Parameters<typeof api.setPermission>[2]) => api.setPermission(designId, param.id, data),
+    onSuccess: (_result, data) => {
+      onSaved();
+      const previous = {
+        editableByConsultant: param.permission?.editableByConsultant ?? false,
+        minValue: param.permission?.minValue ?? undefined,
+        maxValue: param.permission?.maxValue ?? undefined,
+      };
+      pushAction({
+        description: `Set permission for ${param.label}`,
+        undo: async () => {
+          await api.setPermission(designId, param.id, previous);
+          onSaved();
+        },
+        redo: async () => {
+          await api.setPermission(designId, param.id, data);
+          onSaved();
+        },
+      });
+    },
   });
 
   return (
@@ -126,7 +162,17 @@ function PermissionRow({
         <label>Max</label>
         <input value={max} onChange={(e) => setMax(e.target.value)} />
       </div>
-      <button className="btn btn-secondary" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+      <button
+        className="btn btn-secondary"
+        disabled={mutation.isPending}
+        onClick={() =>
+          mutation.mutate({
+            editableByConsultant: editable,
+            minValue: min === "" ? undefined : Number(min),
+            maxValue: max === "" ? undefined : Number(max),
+          })
+        }
+      >
         Save
       </button>
     </div>

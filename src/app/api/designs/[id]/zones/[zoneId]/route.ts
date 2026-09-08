@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { errorResponse } from "@/lib/api/errors";
 import { requireDraftDesign } from "@/lib/api/guards";
+import { deleteGeometryNode } from "@/lib/graph/geometry";
 import { updateZoneSchema } from "@/lib/types";
 
 export async function PUT(
@@ -29,7 +30,7 @@ export async function DELETE(
   try {
     const { id, zoneId } = await params;
     await requireDraftDesign(id);
-    await prisma.geometryNode.delete({ where: { id: zoneId } });
+    await deleteGeometryNode(zoneId);
     return new NextResponse(null, { status: 204 });
   } catch (err) {
     return errorResponse(err);

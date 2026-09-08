@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { ValidationIssue } from "@/lib/types";
+import { WIDTH_TOLERANCE_MM } from "@/lib/graph/constants";
 
-const WIDTH_TOLERANCE_MM = 1;
+const SPATIAL_ADJACENCY_TYPES = new Set(["ADJACENT_TO", "MEETS", "SHARES_BOUNDARY"]);
 
 export async function validateDesign(designId: string): Promise<ValidationIssue[]> {
   const issues: ValidationIssue[] = [];
@@ -24,16 +25,19 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     prisma.panel.findMany({ where: { designId } }),
     prisma.geometryEdge.findMany({ where: { designId } }),
     prisma.geometryEdgeRelationship.findMany({ where: { designId } }),
-    prisma.productInstance.findMany({ where: { designId }, include: { sku: true } }),
+    prisma.productInstance.findMany({
+      where: { designId },
+      include: { sku: { include: { category: true } } },
+    }),
     prisma.geometryProductRelationship.findMany({
       where: { designId },
-      include: { productInstance: { include: { sku: true } } },
+      include: { productInstance: { include: { sku: { include: { category: true } } } } },
     }),
     prisma.productInstanceEdge.findMany({
       where: { designId },
       include: {
-        fromInstance: { include: { sku: true } },
-        toInstance: { include: { sku: true } },
+        fromInstance: { include: { sku: { include: { category: true } } } },
+        toInstance: { include: { sku: { include: { category: true } } } },
         sourceSkuEdge: true,
       },
     }),
@@ -95,7 +99,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
   }
   const adjacentEdgeIdPairs = new Set<string>();
   for (const rel of edgeRelationships) {
-    if (rel.relationshipType !== "ADJACENCY") continue;
+    if (!SPATIAL_ADJACENCY_TYPES.has(rel.relationshipType)) continue;
     adjacentEdgeIdPairs.add(`${rel.edgeAId}:${rel.edgeBId}`);
     adjacentEdgeIdPairs.add(`${rel.edgeBId}:${rel.edgeAId}`);
   }
@@ -210,7 +214,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     const rels = relationshipsByEdgeId.get(edge.id) ?? [];
 
     if (edge.requiresTrim) {
-      const satisfied = rels.some((r) => r.productInstance.sku.category === "CONNECTION");
+      const satisfied = rels.some((r) => r.productInstance.sku.category.key === "CONNECTION");
       if (!satisfied) {
         issues.push({
           code: "EDGE_TREATMENT_TRIM",
@@ -223,7 +227,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     }
 
     if (edge.requiresConnector) {
-      const satisfied = rels.some((r) => r.productInstance.sku.category === "CONNECTION");
+      const satisfied = rels.some((r) => r.productInstance.sku.category.key === "CONNECTION");
       if (!satisfied) {
         issues.push({
           code: "EDGE_TREATMENT_CONNECTOR",
@@ -250,7 +254,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
 
     if (edge.isLightingBoundary) {
       const satisfied = rels.some(
-        (r) => r.productInstance.sku.category === "FUNCTIONAL" && r.productInstance.z != null,
+        (r) => r.productInstance.sku.category.key === "FUNCTIONAL" && r.productInstance.z != null,
       );
       if (!satisfied) {
         issues.push({
@@ -264,10 +268,11 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     }
   }
 
-  // 11. STRUCTURAL_SUPPORT
+  // 11. STRUCTURAL_SUPPORT (offcuts are leftover material, not installed panels -- skipped)
   for (const panel of panels) {
+    if (panel.isOffcut) continue;
     const rels = relationshipsByNodeId.get(panel.id) ?? [];
-    const satisfied = rels.some((r) => r.productInstance.sku.category === "STRUCTURAL");
+    const satisfied = rels.some((r) => r.productInstance.sku.category.key === "STRUCTURAL");
     if (!satisfied) {
       issues.push({
         code: "STRUCTURAL_SUPPORT",
@@ -281,7 +286,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
 
   // 12. FURNITURE_COORDINATES
   for (const instance of productInstances) {
-    if (instance.sku.category !== "FURNITURE") continue;
+    if (instance.sku.category.key !== "FURNITURE") continue;
     if (instance.x == null || instance.y == null) {
       issues.push({
         code: "FURNITURE_COORDINATES",
@@ -377,6 +382,19 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
         message: "Parameter default value falls outside its permitted min/max range",
         refType: "TemplateParameter",
         refId: param.id,
+      });
+    }
+  }
+
+  // 17. PANEL_OFFCUT_WASTE -- an unusable offcut is informational, never blocks publish
+  for (const panel of panels) {
+    if (panel.isOffcut && panel.offcutReusable === false) {
+      issues.push({
+        code: "PANEL_OFFCUT_WASTE",
+        severity: "WARNING",
+        message: "Offcut is below the SKU's minimum cut piece and is not reusable",
+        refType: "Panel",
+        refId: panel.id,
       });
     }
   }

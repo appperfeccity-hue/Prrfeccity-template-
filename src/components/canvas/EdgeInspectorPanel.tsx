@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
+import { useUndoRedo } from "@/lib/undo-redo";
 import type { GeometryEdgeModel } from "@/generated/prisma/models";
 
 const FLAGS: { key: keyof GeometryEdgeModel; label: string }[] = [
@@ -21,10 +22,34 @@ export function EdgeInspectorPanel({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const { pushAction } = useUndoRedo();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["design", designId] });
   const mutation = useMutation({
     mutationFn: (data: Partial<Record<string, boolean>>) => api.updateGeometryEdge(designId, edge.id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["design", designId] }),
+    onSuccess: invalidate,
   });
+
+  const handleToggle = (key: string, label: string, checked: boolean) => {
+    const previousValue = Boolean(edge[key as keyof GeometryEdgeModel]);
+    mutation.mutate(
+      { [key]: checked },
+      {
+        onSuccess: () => {
+          pushAction({
+            description: `Toggle ${label}`,
+            undo: async () => {
+              await api.updateGeometryEdge(designId, edge.id, { [key]: previousValue });
+              invalidate();
+            },
+            redo: async () => {
+              await api.updateGeometryEdge(designId, edge.id, { [key]: checked });
+              invalidate();
+            },
+          });
+        },
+      },
+    );
+  };
 
   return (
     <div className="card">
@@ -39,7 +64,7 @@ export function EdgeInspectorPanel({
           <input
             type="checkbox"
             checked={Boolean(edge[key])}
-            onChange={(e) => mutation.mutate({ [key]: e.target.checked })}
+            onChange={(e) => handleToggle(key, label, e.target.checked)}
           />
           {label}
         </label>

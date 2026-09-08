@@ -16,7 +16,7 @@ export async function GET(
           include: { wall: true, zone: true, partition: true, panel: true, edges: true },
         },
         geometryEdgeRelationships: true,
-        productInstances: { include: { sku: true } },
+        productInstances: { include: { sku: { include: { category: true } } } },
         productInstanceEdges: true,
         geometryProductRelationships: true,
         templateParameters: { include: { permission: true } },

@@ -230,6 +230,25 @@ export default function ZonesPage({ params }: { params: Promise<{ id: string }> 
     },
   });
 
+  const rotatePanelMutation = useMutation({
+    mutationFn: ({ panelId, orientation }: { panelId: string; orientation: "VERTICAL" | "HORIZONTAL"; previousOrientation: "VERTICAL" | "HORIZONTAL" }) =>
+      api.updatePanel(id, panelId, { orientation }),
+    onSuccess: (_result, variables) => {
+      invalidate();
+      pushAction({
+        description: `Rotate panel to ${variables.orientation}`,
+        undo: async () => {
+          await api.updatePanel(id, variables.panelId, { orientation: variables.previousOrientation });
+          invalidate();
+        },
+        redo: async () => {
+          await api.updatePanel(id, variables.panelId, { orientation: variables.orientation });
+          invalidate();
+        },
+      });
+    },
+  });
+
   const handleDropSku = (payload: SkuDragPayload, target: ZoneCanvasDropTarget | null) => {
     if (!target) return; // freestanding placement stays the Products page form's job
     if (target.kind === "partition") {
@@ -307,6 +326,11 @@ export default function ZonesPage({ params }: { params: Promise<{ id: string }> 
               const previousWidthMm = design.geometryNodes.find((n) => n.id === panelId)?.panel?.widthMm;
               if (previousWidthMm == null) return;
               resizePanelMutation.mutate({ panelId, widthMm, previousWidthMm });
+            }}
+            onRotatePanel={(panelId, orientation) => {
+              const previousOrientation = design.geometryNodes.find((n) => n.id === panelId)?.panel?.orientation;
+              if (previousOrientation == null) return;
+              rotatePanelMutation.mutate({ panelId, orientation, previousOrientation });
             }}
           />
           <SkuPalette skus={skusQuery.data ?? []} />

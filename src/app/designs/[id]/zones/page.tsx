@@ -313,6 +313,22 @@ export default function ZonesPage({ params }: { params: Promise<{ id: string }> 
           </button>
         </div>
         {addZoneMutation.isError && <p className="issue-error">{(addZoneMutation.error as Error).message}</p>}
+        {zoneNodes.map((z) => (
+          <div key={z.id} className="form-row" style={{ borderTop: "1px solid #eee", paddingTop: 8, marginTop: 8 }}>
+            <div className="field">
+              Zone {z.zone!.orderIndex} · {z.zone!.associatesWith} · {z.zone!.widthMm}mm
+            </div>
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                if (!confirm("Delete this zone? This cannot be undone.")) return;
+                api.deleteZone(id, z.id).then(invalidate);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        ))}
       </div>
 
       {design && (
@@ -419,6 +435,22 @@ export default function ZonesPage({ params }: { params: Promise<{ id: string }> 
             Add Partition
           </button>
         </div>
+        {allPartitions.map((p) => (
+          <div key={p.id} className="form-row" style={{ borderTop: "1px solid #eee", paddingTop: 8, marginTop: 8 }}>
+            <div className="field">
+              {p.label} ({p.partition!.widthMm}mm)
+            </div>
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                if (!confirm("Delete this partition? This cannot be undone.")) return;
+                api.deleteGeometryNode(id, p.id).then(invalidate);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        ))}
       </div>
 
       <div className="card">
@@ -457,6 +489,22 @@ export default function ZonesPage({ params }: { params: Promise<{ id: string }> 
           </button>
         </div>
         <p style={{ color: "#888", fontSize: 13 }}>Click a panel's edge line on the canvas above to flag it (trim / connector / termination / lighting).</p>
+        {allPartitions.flatMap((p) => panelsForPartition(p.id)).map((panel) => (
+          <div key={panel.id} className="form-row" style={{ borderTop: "1px solid #eee", paddingTop: 8, marginTop: 8 }}>
+            <div className="field">
+              {panel.label} ({panel.panel!.widthMm}mm · {panel.panel!.orientation})
+            </div>
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                if (!confirm("Delete this panel? This cannot be undone.")) return;
+                api.deleteGeometryNode(id, panel.id).then(invalidate);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        ))}
       </div>
 
       {zoneNodes.length >= 2 && (

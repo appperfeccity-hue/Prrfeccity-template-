@@ -6,6 +6,7 @@ import type {
   GeometryEdgeRelationshipModel as GeometryEdgeRelationship,
   GeometryNodeModel as GeometryNode,
   GeometryProductRelationshipModel as GeometryProductRelationship,
+  LookModel as Look,
   MasterBomModel as MasterBom,
   PanelModel as Panel,
   ProductInstanceModel as ProductInstance,
@@ -35,6 +36,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return json as T;
 }
 
+export type { Look };
+
 export type SkuWithCategory = SkuMaster & { category: Category };
 
 export type FullDesign = Design & {
@@ -62,11 +65,23 @@ export type QuantityRule =
 
 export type RelationshipOriginValue = "DESIGNER_DEFINED" | "CATALOG_DERIVED";
 
+export type LibraryRoomTypeValue = "LIVING_ROOM" | "TV_UNIT" | "BEDROOM";
+
 export const api = {
   listDesigns: () => request<Design[]>("GET", "/designs"),
   createDesign: (data: { name: string; description?: string; tags?: string[] }) =>
     request<Design>("POST", "/designs", data),
   getDesign: (id: string) => request<FullDesign>("GET", `/designs/${id}`),
+  updateDesign: (
+    id: string,
+    data: {
+      libraryRoomType?: LibraryRoomTypeValue | null;
+      lookId?: string | null;
+      pricePerSqFt?: number | null;
+      areaSqFt?: number | null;
+      isFavorited?: boolean;
+    },
+  ) => request<Design>("PATCH", `/designs/${id}`, data),
   reviseDesign: (id: string) => request<Design>("POST", `/designs/${id}/revise`),
 
   setWall: (
@@ -133,6 +148,7 @@ export const api = {
     request<void>("DELETE", `/designs/${id}/geometry-nodes/${nodeId}`),
 
   listCategories: () => request<Category[]>("GET", "/categories"),
+  listLooks: () => request<Look[]>("GET", "/looks"),
 
   listSkus: (category?: string) =>
     request<SkuWithCategory[]>("GET", `/skus${category ? `?category=${category}` : ""}`),
@@ -227,6 +243,6 @@ export const api = {
   previewValidation: (id: string) => request<{ issues: ValidationIssue[]; passed: boolean }>("GET", `/designs/${id}/validate/preview`),
   previewBom: (id: string) => request<{ lines: BomLineInput[] }>("GET", `/designs/${id}/bom/preview`),
 
-  listLibrary: () => request<Design[]>("GET", "/library"),
+  listLibrary: () => request<(Design & { look: Look | null })[]>("GET", "/library"),
   getLibraryEntry: (id: string) => request<FullDesign>("GET", `/library/${id}`),
 };

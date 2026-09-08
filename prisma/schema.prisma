@@ -19,6 +19,25 @@ enum DesignStatus {
   PUBLISHED
 }
 
+// Library browsing/merchandising taxonomy -- presentation metadata for the
+// Design Library grid, distinct from the design graph. Editable even after
+// a Template is published, since "published templates are immutable" is
+// about the geometry/product graph, not how a template is displayed.
+enum LibraryRoomType {
+  LIVING_ROOM
+  TV_UNIT
+  BEDROOM
+}
+
+model Look {
+  id          String @id @default(cuid())
+  key         String @unique
+  label       String
+  swatchColor String // hex color placeholder swatch -- no real material photography yet
+
+  designs Design[]
+}
+
 model Design {
   id               String       @id @default(cuid())
   name             String
@@ -33,6 +52,13 @@ model Design {
   updatedAt        DateTime     @updatedAt
   publishedAt      DateTime?
 
+  libraryRoomType LibraryRoomType?
+  lookId          String?
+  look            Look?            @relation(fields: [lookId], references: [id])
+  pricePerSqFt    Float?
+  areaSqFt        Float?
+  isFavorited     Boolean          @default(false)
+
   geometryNodes                GeometryNode[]
   geometryEdges                GeometryEdge[]
   geometryEdgeRelationships    GeometryEdgeRelationship[]
@@ -45,6 +71,7 @@ model Design {
 
   @@index([rootTemplateId])
   @@index([status])
+  @@index([lookId])
 }
 
 model DesignValidationResult {

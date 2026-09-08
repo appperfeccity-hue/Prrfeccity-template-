@@ -1,0 +1,418 @@
+// Designer Canvas -> Published Template data model.
+// See /root/.claude/plans/designer-canvas-published-imperative-bird.md for the full architecture rationale.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Template / Design Library
+// ---------------------------------------------------------------------------
+
+enum DesignStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Design {
+  id               String       @id @default(cuid())
+  name             String
+  description      String?
+  tags             String[]     @default([])
+  thumbnailUrl     String?
+  version          Int          @default(1)
+  status           DesignStatus @default(DRAFT)
+  rootTemplateId   String?
+  parentTemplateId String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  publishedAt      DateTime?
+
+  geometryNodes                GeometryNode[]
+  geometryEdges                GeometryEdge[]
+  geometryEdgeRelationships    GeometryEdgeRelationship[]
+  productInstances             ProductInstance[]
+  productInstanceEdges         ProductInstanceEdge[]
+  geometryProductRelationships GeometryProductRelationship[]
+  templateParameters           TemplateParameter[]
+  validationResults            DesignValidationResult[]
+  masterBoms                   MasterBom[]
+
+  @@index([rootTemplateId])
+  @@index([status])
+}
+
+model DesignValidationResult {
+  id       String   @id @default(cuid())
+  designId String
+  design   Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+  ranAt    DateTime @default(now())
+  passed   Boolean
+  issues   Json[]   @default([])
+
+  @@index([designId, ranAt])
+}
+
+// ---------------------------------------------------------------------------
+// Geometry graph
+// ---------------------------------------------------------------------------
+
+enum GeometryNodeType {
+  WALL
+  ZONE
+  PARTITION
+  PANEL
+}
+
+model GeometryNode {
+  id       String           @id @default(cuid())
+  designId String
+  design   Design           @relation(fields: [designId], references: [id], onDelete: Cascade)
+  nodeType GeometryNodeType
+  label    String?
+
+  wall                         Wall?
+  zone                         Zone?
+  partition                    ZonePartition?
+  panel                        Panel?
+  edges                        GeometryEdge[]
+  productInstances             ProductInstance[]
+  geometryProductRelationships GeometryProductRelationship[]
+
+  @@index([designId, nodeType])
+}
+
+enum WallType {
+  STRAIGHT_LTR
+  STRAIGHT_RTL
+  L_TYPE
+}
+
+model Wall {
+  id             String       @id
+  node           GeometryNode @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId       String
+  wallType       WallType
+  lengthMm       Float
+  heightMm       Float
+  cornerAngleDeg Float?
+
+  zones Zone[]
+}
+
+enum ZoneAssociation {
+  WALL
+  STRUCTURE
+}
+
+model Zone {
+  id              String          @id
+  node            GeometryNode    @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId        String
+  wallId          String?
+  wall            Wall?           @relation(fields: [wallId], references: [id])
+  associatesWith  ZoneAssociation
+  orderIndex      Int
+  widthMm         Float
+  heightMm        Float
+  hasCoveLighting Boolean         @default(false)
+  coveLightZMm    Float?
+
+  partitions ZonePartition[]
+}
+
+model ZonePartition {
+  id         String       @id
+  node       GeometryNode @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId   String
+  zoneId     String
+  zone       Zone         @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  orderIndex Int
+  widthMm    Float
+  heightMm   Float
+
+  panels Panel[]
+}
+
+enum PanelOrientation {
+  VERTICAL
+  HORIZONTAL
+}
+
+model Panel {
+  id          String           @id
+  node        GeometryNode     @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId    String
+  partitionId String
+  partition   ZonePartition    @relation(fields: [partitionId], references: [id], onDelete: Cascade)
+  orderIndex  Int
+  widthMm     Float
+  heightMm    Float
+  orientation PanelOrientation
+}
+
+enum GeometryEdgeRole {
+  LEFT
+  RIGHT
+  TOP
+  BOTTOM
+  CORNER
+  OUTER_BOUNDARY
+  INNER_BOUNDARY
+  PARTITION_EDGE
+}
+
+model GeometryEdge {
+  id                  String           @id @default(cuid())
+  designId            String
+  design              Design           @relation(fields: [designId], references: [id], onDelete: Cascade)
+  nodeId              String
+  node                GeometryNode     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  edgeRole            GeometryEdgeRole
+  requiresTermination Boolean          @default(false)
+  requiresConnector   Boolean          @default(false)
+  requiresTrim        Boolean          @default(false)
+  isLightingBoundary  Boolean          @default(false)
+  metadata            Json?
+
+  edgeRelationshipsAsA         GeometryEdgeRelationship[]    @relation("EdgeA")
+  edgeRelationshipsAsB         GeometryEdgeRelationship[]    @relation("EdgeB")
+  geometryProductRelationships GeometryProductRelationship[]
+  templateParameters           TemplateParameter[]
+
+  @@index([designId, edgeRole])
+  @@index([nodeId])
+}
+
+enum GeometryEdgeRelationshipType {
+  ADJACENCY
+}
+
+// Models edge-to-edge relationships explicitly (e.g. Zone A's right boundary edge
+// <-> Zone B's left boundary edge) instead of collapsing them into a generic
+// node-to-node edge, so each side keeps its own independent semantics.
+model GeometryEdgeRelationship {
+  id               String                       @id @default(cuid())
+  designId         String
+  design           Design                       @relation(fields: [designId], references: [id], onDelete: Cascade)
+  edgeAId          String
+  edgeA            GeometryEdge                 @relation("EdgeA", fields: [edgeAId], references: [id], onDelete: Cascade)
+  edgeBId          String
+  edgeB            GeometryEdge                 @relation("EdgeB", fields: [edgeBId], references: [id], onDelete: Cascade)
+  relationshipType GeometryEdgeRelationshipType
+
+  @@index([designId])
+  @@index([edgeAId])
+  @@index([edgeBId])
+}
+
+// ---------------------------------------------------------------------------
+// Product graph (SKU Master = catalog truth)
+// ---------------------------------------------------------------------------
+
+enum SkuCategory {
+  PRIMARY
+  STRUCTURAL
+  CONNECTION
+  DECORATIVE
+  FUNCTIONAL
+  INSTALLATION
+  FURNITURE
+}
+
+model SkuMaster {
+  id             String      @id @default(cuid())
+  code           String      @unique
+  name           String
+  category       SkuCategory
+  defaultWidthMm Float?
+  defaultUnit    String      @default("EA")
+  attributes     Json?
+
+  edgesFrom        SkuEdge[]         @relation("SkuEdgeFrom")
+  edgesTo          SkuEdge[]         @relation("SkuEdgeTo")
+  productInstances ProductInstance[]
+}
+
+enum SkuEdgeType {
+  REQUIRES
+  CONNECTS
+  TERMINATES
+  SUPPORTS
+  INTERACTS
+}
+
+// Catalog-level truth: "PANEL-600 REQUIRES PVC-BACK-01". The Canvas only
+// references these rows, it never redefines them.
+model SkuEdge {
+  id        String      @id @default(cuid())
+  fromSkuId String
+  fromSku   SkuMaster   @relation("SkuEdgeFrom", fields: [fromSkuId], references: [id], onDelete: Cascade)
+  toSkuId   String
+  toSku     SkuMaster   @relation("SkuEdgeTo", fields: [toSkuId], references: [id], onDelete: Cascade)
+  edgeType  SkuEdgeType
+
+  productInstanceEdges ProductInstanceEdge[]
+
+  @@index([fromSkuId])
+  @@index([toSkuId])
+}
+
+model ProductInstance {
+  id             String        @id @default(cuid())
+  designId       String
+  design         Design        @relation(fields: [designId], references: [id], onDelete: Cascade)
+  skuId          String
+  sku            SkuMaster     @relation(fields: [skuId], references: [id])
+  geometryNodeId String?
+  geometryNode   GeometryNode? @relation(fields: [geometryNodeId], references: [id])
+  x              Float?
+  y              Float?
+  z              Float?
+  rotationDeg    Float         @default(0)
+  quantity       Float         @default(1)
+
+  edgesFrom                    ProductInstanceEdge[]         @relation("InstanceEdgeFrom")
+  edgesTo                      ProductInstanceEdge[]         @relation("InstanceEdgeTo")
+  geometryProductRelationships GeometryProductRelationship[]
+  masterBomLinesDirect         MasterBomLine[]               @relation("BomLineFromInstance")
+  templateParameters           TemplateParameter[]
+
+  @@index([designId, skuId])
+}
+
+// The Designer's realization of a SkuEdge catalog rule for specific placed
+// instances, e.g. "PanelInstance-17 requires BackSheetInstance-22", optionally
+// pointing back at the SkuEdge it materializes via sourceSkuEdgeId.
+model ProductInstanceEdge {
+  id              String          @id @default(cuid())
+  designId        String
+  design          Design          @relation(fields: [designId], references: [id], onDelete: Cascade)
+  fromInstanceId  String
+  fromInstance    ProductInstance @relation("InstanceEdgeFrom", fields: [fromInstanceId], references: [id], onDelete: Cascade)
+  toInstanceId    String
+  toInstance      ProductInstance @relation("InstanceEdgeTo", fields: [toInstanceId], references: [id], onDelete: Cascade)
+  edgeType        SkuEdgeType
+  sourceSkuEdgeId String?
+  sourceSkuEdge   SkuEdge?        @relation(fields: [sourceSkuEdgeId], references: [id])
+
+  masterBomLines MasterBomLine[] @relation("BomLineFromInstanceEdge")
+
+  @@index([designId])
+  @@index([fromInstanceId])
+  @@index([toInstanceId])
+}
+
+enum GeometryProductRelationshipType {
+  HAS_TREATMENT
+  SUPPORTS
+  TERMINATES
+  BOUNDARY_OF
+  POSITIONED_AT
+  ADJACENT_TO
+}
+
+// The join that connects a geometry fact to a product instance, e.g.
+// "E17 --TERMINATES--> TrimInstance-42". Exactly one of geometryEdgeId /
+// geometryNodeId is set (enforced at the API layer).
+model GeometryProductRelationship {
+  id                String                          @id @default(cuid())
+  designId          String
+  design            Design                          @relation(fields: [designId], references: [id], onDelete: Cascade)
+  geometryEdgeId    String?
+  geometryEdge      GeometryEdge?                   @relation(fields: [geometryEdgeId], references: [id], onDelete: Cascade)
+  geometryNodeId    String?
+  geometryNode      GeometryNode?                   @relation(fields: [geometryNodeId], references: [id], onDelete: Cascade)
+  productInstanceId String
+  productInstance   ProductInstance                 @relation(fields: [productInstanceId], references: [id], onDelete: Cascade)
+  relationshipType  GeometryProductRelationshipType
+
+  masterBomLines MasterBomLine[] @relation("BomLineFromRelationship")
+
+  @@index([designId])
+  @@index([geometryEdgeId])
+  @@index([geometryNodeId])
+  @@index([productInstanceId])
+}
+
+// ---------------------------------------------------------------------------
+// Consultant permissions
+// ---------------------------------------------------------------------------
+
+enum ParameterType {
+  NUMERIC_RANGE
+  ENUM_SELECTION
+  POSITION
+  SKU_SUBSTITUTION
+  EDGE_TREATMENT
+  QUANTITY
+}
+
+model TemplateParameter {
+  id                      String           @id @default(cuid())
+  templateId              String
+  template                Design           @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  targetProductInstanceId String?
+  targetProductInstance   ProductInstance? @relation(fields: [targetProductInstanceId], references: [id], onDelete: Cascade)
+  targetGeometryEdgeId    String?
+  targetGeometryEdge      GeometryEdge?    @relation(fields: [targetGeometryEdgeId], references: [id], onDelete: Cascade)
+  paramKey                String
+  paramType               ParameterType
+  label                   String
+  defaultValue            String
+  unit                    String?
+
+  permission ConsultantPermission?
+
+  @@index([templateId])
+}
+
+model ConsultantPermission {
+  id                   String            @id @default(cuid())
+  templateParameterId  String            @unique
+  templateParameter    TemplateParameter @relation(fields: [templateParameterId], references: [id], onDelete: Cascade)
+  editableByConsultant Boolean           @default(false)
+  minValue             Float?
+  maxValue             Float?
+  allowedValues        String[]          @default([])
+}
+
+// ---------------------------------------------------------------------------
+// Master BOM
+// ---------------------------------------------------------------------------
+
+model MasterBom {
+  id          String   @id @default(cuid())
+  templateId  String
+  template    Design   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  version     Int
+  generatedAt DateTime @default(now())
+
+  lines MasterBomLine[]
+
+  @@index([templateId])
+}
+
+model MasterBomLine {
+  id            String    @id @default(cuid())
+  masterBomId   String
+  masterBom     MasterBom @relation(fields: [masterBomId], references: [id], onDelete: Cascade)
+  skuId         String
+  quantity      Float
+  unitOfMeasure String
+
+  sourceGeometryProductRelationshipId String?
+  sourceGeometryProductRelationship   GeometryProductRelationship? @relation("BomLineFromRelationship", fields: [sourceGeometryProductRelationshipId], references: [id], onDelete: Cascade)
+  sourceProductInstanceEdgeId         String?
+  sourceProductInstanceEdge           ProductInstanceEdge?         @relation("BomLineFromInstanceEdge", fields: [sourceProductInstanceEdgeId], references: [id], onDelete: Cascade)
+  sourceProductInstanceId             String?
+  sourceProductInstance               ProductInstance?             @relation("BomLineFromInstance", fields: [sourceProductInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([masterBomId])
+  @@index([skuId])
+}

@@ -33,6 +33,15 @@ const skus: SkuSeed[] = [
   { code: "SKU-FURN-VANITY-01", name: "Vanity Unit", categoryKey: "FURNITURE" },
 ];
 
+const looks: { key: string; label: string; swatchColor: string }[] = [
+  { key: "MARBLE_LIGHT", label: "Marble", swatchColor: "#d8c9b0" },
+  { key: "MARBLE_DARK", label: "Marble", swatchColor: "#3a2f28" },
+  { key: "WOODEN", label: "Wooden", swatchColor: "#5c4030" },
+  { key: "FABRIC", label: "Fabric", swatchColor: "#c9c2b5" },
+  { key: "WASLITE", label: "Waslite", swatchColor: "#dbe4e6" },
+  { key: "GREY", label: "Grey", swatchColor: "#8b93a0" },
+];
+
 const skuEdges: { from: string; to: string; edgeType: SkuEdgeType }[] = [
   { from: "SKU-PANEL-600", to: "SKU-PVC-BACK-01", edgeType: "REQUIRES" },
   { from: "SKU-PANEL-300", to: "SKU-PVC-BACK-01", edgeType: "REQUIRES" },
@@ -93,7 +102,17 @@ async function main() {
     }
   }
 
-  console.log(`Seeded ${categories.length} categories, ${skus.length} SKUs, ${skuEdges.length} SKU edges.`);
+  for (const look of looks) {
+    await prisma.look.upsert({
+      where: { key: look.key },
+      update: { label: look.label, swatchColor: look.swatchColor },
+      create: { key: look.key, label: look.label, swatchColor: look.swatchColor },
+    });
+  }
+
+  console.log(
+    `Seeded ${categories.length} categories, ${skus.length} SKUs, ${skuEdges.length} SKU edges, ${looks.length} looks.`,
+  );
 }
 
 main()

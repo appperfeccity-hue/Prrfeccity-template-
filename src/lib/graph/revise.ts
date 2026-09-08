@@ -28,6 +28,11 @@ export async function reviseTemplate(templateId: string) {
         status: "DRAFT",
         parentTemplateId: parent.id,
         rootTemplateId: parent.rootTemplateId ?? parent.id,
+        libraryRoomType: parent.libraryRoomType,
+        lookId: parent.lookId,
+        pricePerSqFt: parent.pricePerSqFt,
+        areaSqFt: parent.areaSqFt,
+        isFavorited: parent.isFavorited,
       },
     });
 

@@ -167,6 +167,16 @@ export const updatePanelSchema = z.object({
   orientation: z.enum(["VERTICAL", "HORIZONTAL"]).optional(),
 });
 
+// Design Library presentation metadata -- not part of the design graph, so
+// editable even on a PUBLISHED design (see requireDesign vs requireDraftDesign).
+export const updateDesignSchema = z.object({
+  libraryRoomType: z.enum(["LIVING_ROOM", "TV_UNIT", "BEDROOM"]).nullable().optional(),
+  lookId: z.string().nullable().optional(),
+  pricePerSqFt: z.number().positive().nullable().optional(),
+  areaSqFt: z.number().positive().nullable().optional(),
+  isFavorited: z.boolean().optional(),
+});
+
 export const updateEdgeFlagsSchema = z.object({
   requiresTermination: z.boolean().optional(),
   requiresConnector: z.boolean().optional(),

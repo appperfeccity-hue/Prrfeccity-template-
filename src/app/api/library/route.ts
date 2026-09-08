@@ -5,6 +5,7 @@ export async function GET() {
   const published = await prisma.design.findMany({
     where: { status: "PUBLISHED" },
     orderBy: { version: "desc" },
+    include: { look: true },
   });
 
   const latestByLineage = new Map<string, (typeof published)[number]>();

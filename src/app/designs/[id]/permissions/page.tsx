@@ -175,6 +175,15 @@ function PermissionRow({
       >
         Save
       </button>
+      <button
+        className="btn btn-secondary"
+        onClick={() => {
+          if (!confirm("Delete this parameter? This cannot be undone.")) return;
+          api.deleteTemplateParameter(designId, param.id).then(onSaved);
+        }}
+      >
+        Delete
+      </button>
     </div>
   );
 }

@@ -231,6 +231,11 @@ model Category {
   skus SkuMaster[]
 }
 
+// Extension point: catalog/version history is intentionally not modeled yet
+// (no version field, no snapshot-at-publish-time reference from MasterBomLine
+// back to a specific SkuMaster revision). Deferred alongside Consultant
+// Project State / Physical Engine / Resolver until a concrete need names the
+// actual versioning scheme required.
 model SkuMaster {
   id             String   @id @default(cuid())
   code           String   @unique
@@ -298,20 +303,30 @@ model ProductInstance {
   @@index([designId, skuId])
 }
 
+// Whether a design-graph relationship was created by explicit Designer action
+// or by the Designer accepting a catalog-derived suggestion (see
+// src/lib/suggestions.ts). Never set by silent/automatic creation -- every
+// CATALOG_DERIVED row still traces back to an explicit "Add" click.
+enum RelationshipOrigin {
+  DESIGNER_DEFINED
+  CATALOG_DERIVED
+}
+
 // The Designer's realization of a SkuEdge catalog rule for specific placed
 // instances, e.g. "PanelInstance-17 requires BackSheetInstance-22", optionally
 // pointing back at the SkuEdge it materializes via sourceSkuEdgeId.
 model ProductInstanceEdge {
-  id              String          @id @default(cuid())
+  id              String             @id @default(cuid())
   designId        String
-  design          Design          @relation(fields: [designId], references: [id], onDelete: Cascade)
+  design          Design             @relation(fields: [designId], references: [id], onDelete: Cascade)
   fromInstanceId  String
-  fromInstance    ProductInstance @relation("InstanceEdgeFrom", fields: [fromInstanceId], references: [id], onDelete: Cascade)
+  fromInstance    ProductInstance    @relation("InstanceEdgeFrom", fields: [fromInstanceId], references: [id], onDelete: Cascade)
   toInstanceId    String
-  toInstance      ProductInstance @relation("InstanceEdgeTo", fields: [toInstanceId], references: [id], onDelete: Cascade)
+  toInstance      ProductInstance    @relation("InstanceEdgeTo", fields: [toInstanceId], references: [id], onDelete: Cascade)
   edgeType        SkuEdgeType
   sourceSkuEdgeId String?
-  sourceSkuEdge   SkuEdge?        @relation(fields: [sourceSkuEdgeId], references: [id])
+  sourceSkuEdge   SkuEdge?           @relation(fields: [sourceSkuEdgeId], references: [id])
+  origin          RelationshipOrigin @default(DESIGNER_DEFINED)
 
   masterBomLines MasterBomLine[] @relation("BomLineFromInstanceEdge")
 
@@ -349,6 +364,7 @@ model GeometryProductRelationship {
   // { "type": "FIXED", "value": n } | { "type": "PER_LENGTH_MM", "perMm": n } | null.
   // Drives resolveQuantity() in bom.ts; null falls back to productInstance.quantity.
   quantityRule      Json?
+  origin            RelationshipOrigin              @default(DESIGNER_DEFINED)
 
   masterBomLines MasterBomLine[] @relation("BomLineFromRelationship")
 

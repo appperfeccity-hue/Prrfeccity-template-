@@ -18,6 +18,8 @@ import type {
   ZoneModel as Zone,
   ZonePartitionModel as ZonePartition,
 } from "@/generated/prisma/models";
+import type { ValidationIssue } from "@/lib/types";
+import type { BomLineInput } from "@/lib/graph/bom";
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -57,6 +59,8 @@ export type QuantityRule =
   | { type: "FIXED"; value: number }
   | { type: "PER_LENGTH_MM"; perMm: number }
   | null;
+
+export type RelationshipOriginValue = "DESIGNER_DEFINED" | "CATALOG_DERIVED";
 
 export const api = {
   listDesigns: () => request<Design[]>("GET", "/designs"),
@@ -171,6 +175,7 @@ export const api = {
       relationshipType: string;
       condition?: unknown;
       quantityRule?: QuantityRule;
+      origin?: RelationshipOriginValue;
     },
   ) => request<GeometryProductRelationship>("POST", `/designs/${id}/geometry-product-relationships`, data),
 
@@ -179,7 +184,13 @@ export const api = {
 
   createProductInstanceEdge: (
     id: string,
-    data: { fromInstanceId: string; toInstanceId: string; edgeType: string; sourceSkuEdgeId?: string },
+    data: {
+      fromInstanceId: string;
+      toInstanceId: string;
+      edgeType: string;
+      sourceSkuEdgeId?: string;
+      origin?: RelationshipOriginValue;
+    },
   ) => request<ProductInstanceEdge>("POST", `/designs/${id}/product-instance-edges`, data),
 
   deleteProductInstanceEdge: (id: string, edgeId: string) =>
@@ -211,6 +222,10 @@ export const api = {
   getBom: (id: string) => request<MasterBom & { lines: unknown[] }>("GET", `/designs/${id}/bom`),
   generateBom: (id: string) => request<MasterBom & { lines: unknown[] }>("POST", `/designs/${id}/bom`, {}),
   publish: (id: string) => request<Design>("POST", `/designs/${id}/publish`, {}),
+
+  // Non-persisting live previews -- see /validate/preview and /bom/preview routes.
+  previewValidation: (id: string) => request<{ issues: ValidationIssue[]; passed: boolean }>("GET", `/designs/${id}/validate/preview`),
+  previewBom: (id: string) => request<{ lines: BomLineInput[] }>("GET", `/designs/${id}/bom/preview`),
 
   listLibrary: () => request<Design[]>("GET", "/library"),
   getLibraryEntry: (id: string) => request<FullDesign>("GET", `/library/${id}`),

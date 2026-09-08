@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { generateMasterBom } from "@/lib/graph/bom";
+import { generateMasterBom, computeMasterBomLines } from "@/lib/graph/bom";
 import { runAndPersistValidation } from "@/lib/graph/validation";
 import { buildValidTemplateFixture, deleteFixtureDesign } from "./helpers";
 
@@ -19,6 +19,32 @@ describe("generateMasterBom", () => {
     designIdToCleanUp = fixture.design.id;
 
     await expect(generateMasterBom(fixture.design.id)).rejects.toThrow(/validation/i);
+  });
+
+  it("computeMasterBomLines works as a live preview even without a passing (or any) validation result, while generateMasterBom's persisted gate is unaffected", async () => {
+    const fixture = await buildValidTemplateFixture();
+    designIdToCleanUp = fixture.design.id;
+
+    // No validation has been run at all yet -- computeMasterBomLines should
+    // still return the same provenance-derived lines a live preview needs.
+    const previewLines = await computeMasterBomLines(fixture.design.id);
+    expect(previewLines.length).toBe(7);
+    for (const line of previewLines) {
+      const sourceCount = [
+        line.sourceGeometryProductRelationshipId,
+        line.sourceProductInstanceEdgeId,
+        line.sourceProductInstanceId,
+      ].filter((v) => v != null).length;
+      expect(sourceCount).toBe(1);
+    }
+
+    // The persisted path's gate is untouched: still refuses without a passing validation.
+    await expect(generateMasterBom(fixture.design.id)).rejects.toThrow(/validation/i);
+
+    // Once validation passes, persisted generation produces the same line data.
+    await runAndPersistValidation(fixture.design.id);
+    const persisted = await generateMasterBom(fixture.design.id);
+    expect(persisted.lines.length).toBe(previewLines.length);
   });
 
   it("produces one line per provenance source, each with exactly one source FK", async () => {

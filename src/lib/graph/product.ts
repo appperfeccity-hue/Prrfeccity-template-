@@ -3,6 +3,7 @@ import { badRequest } from "@/lib/api/errors";
 import type {
   GeometryProductRelationshipType,
   Prisma,
+  RelationshipOrigin,
   SkuEdgeType,
 } from "@/generated/prisma/client";
 
@@ -55,6 +56,7 @@ export async function createGeometryProductRelationship(
     relationshipType: GeometryProductRelationshipType;
     condition?: unknown;
     quantityRule?: unknown;
+    origin?: RelationshipOrigin;
   },
 ) {
   const hasEdge = Boolean(input.geometryEdgeId);
@@ -72,6 +74,7 @@ export async function createGeometryProductRelationship(
       relationshipType: input.relationshipType,
       condition: input.condition as Prisma.InputJsonValue | undefined,
       quantityRule: input.quantityRule as Prisma.InputJsonValue | undefined,
+      origin: input.origin ?? "DESIGNER_DEFINED",
     },
   });
 }
@@ -87,6 +90,7 @@ export async function createProductInstanceEdge(
     toInstanceId: string;
     edgeType: SkuEdgeType;
     sourceSkuEdgeId?: string | null;
+    origin?: RelationshipOrigin;
   },
 ) {
   return prisma.productInstanceEdge.create({
@@ -96,6 +100,7 @@ export async function createProductInstanceEdge(
       toInstanceId: input.toInstanceId,
       edgeType: input.edgeType,
       sourceSkuEdgeId: input.sourceSkuEdgeId ?? null,
+      origin: input.origin ?? "DESIGNER_DEFINED",
     },
   });
 }

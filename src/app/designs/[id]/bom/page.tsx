@@ -3,6 +3,7 @@
 import { use, useState, Fragment } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
+import { LiveSummaryStrip } from "@/components/layout/LiveSummaryStrip";
 
 type BomLine = {
   id: string;
@@ -45,6 +46,7 @@ export default function BomPage({ params }: { params: Promise<{ id: string }> })
 
   return (
     <div>
+      <LiveSummaryStrip designId={id} />
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>

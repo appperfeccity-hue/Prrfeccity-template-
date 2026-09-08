@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CORNER_ANGLE_TOLERANCE_DEG } from "@/lib/graph/constants";
 
 export const createDesignSchema = z.object({
   name: z.string().min(1),
@@ -6,12 +7,26 @@ export const createDesignSchema = z.object({
   tags: z.array(z.string()).optional(),
 });
 
-export const setWallSchema = z.object({
-  wallType: z.enum(["STRAIGHT_LTR", "STRAIGHT_RTL", "L_TYPE"]),
-  lengthMm: z.number().positive(),
-  heightMm: z.number().positive(),
-  cornerAngleDeg: z.number().optional(),
-});
+export const setWallSchema = z
+  .object({
+    wallType: z.enum(["STRAIGHT_LTR", "STRAIGHT_RTL", "L_TYPE"]),
+    lengthMm: z.number().positive(),
+    heightMm: z.number().positive(),
+    cornerAngleDeg: z.number().optional(),
+  })
+  // L-Type's corner angle defaults to 90 when omitted (the only supported
+  // value) so existing callers that don't send one keep working; explicitly
+  // sending a different value is still rejected below.
+  .transform((v) => ({
+    ...v,
+    cornerAngleDeg: v.wallType === "L_TYPE" && v.cornerAngleDeg == null ? 90 : v.cornerAngleDeg,
+  }))
+  .refine(
+    (v) =>
+      v.wallType !== "L_TYPE" ||
+      (v.cornerAngleDeg != null && Math.abs(v.cornerAngleDeg - 90) <= CORNER_ANGLE_TOLERANCE_DEG),
+    { message: "L-Type walls must have a corner angle of exactly 90 degrees" },
+  );
 
 export const createZoneSchema = z.object({
   wallId: z.string().optional(),
@@ -72,6 +87,8 @@ export const skuEdgeTypes = [
   "INSTALLED_WITH",
 ] as const;
 
+export const relationshipOrigins = ["DESIGNER_DEFINED", "CATALOG_DERIVED"] as const;
+
 export const quantityRuleSchema = z
   .union([
     z.object({ type: z.literal("FIXED"), value: z.number().positive() }),
@@ -95,6 +112,7 @@ export const createGeometryProductRelationshipSchema = z
     ]),
     condition: z.any().optional(),
     quantityRule: quantityRuleSchema,
+    origin: z.enum(relationshipOrigins).optional(),
   })
   .refine((v) => Boolean(v.geometryEdgeId) !== Boolean(v.geometryNodeId), {
     message: "Exactly one of geometryEdgeId or geometryNodeId must be set",
@@ -105,6 +123,7 @@ export const createProductInstanceEdgeSchema = z.object({
   toInstanceId: z.string(),
   edgeType: z.enum(skuEdgeTypes),
   sourceSkuEdgeId: z.string().optional(),
+  origin: z.enum(relationshipOrigins).optional(),
 });
 
 export const createTemplateParameterSchema = z.object({

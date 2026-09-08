@@ -108,6 +108,8 @@ export async function reviseTemplate(templateId: string) {
           widthMm: panel.widthMm,
           heightMm: panel.heightMm,
           orientation: panel.orientation,
+          isOffcut: panel.isOffcut,
+          offcutReusable: panel.offcutReusable,
         },
       });
     }
@@ -171,6 +173,7 @@ export async function reviseTemplate(templateId: string) {
           toInstanceId: instanceIdMap.get(edge.toInstanceId)!,
           edgeType: edge.edgeType,
           sourceSkuEdgeId: edge.sourceSkuEdgeId,
+          origin: edge.origin,
         },
       });
     }
@@ -186,6 +189,9 @@ export async function reviseTemplate(templateId: string) {
           geometryNodeId: rel.geometryNodeId ? nodeIdMap.get(rel.geometryNodeId) : null,
           productInstanceId: instanceIdMap.get(rel.productInstanceId)!,
           relationshipType: rel.relationshipType,
+          condition: rel.condition as Prisma.InputJsonValue | undefined,
+          quantityRule: rel.quantityRule as Prisma.InputJsonValue | undefined,
+          origin: rel.origin,
         },
       });
     }

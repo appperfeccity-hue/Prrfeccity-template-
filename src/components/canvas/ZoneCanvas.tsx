@@ -30,12 +30,14 @@ export function ZoneCanvas({
   onSelectEdge,
   onDropSku,
   onResizePanel,
+  onRotatePanel,
 }: {
   nodes: Node[];
   selectedEdgeId?: string | null;
   onSelectEdge: (edge: GeometryEdgeModel) => void;
   onDropSku?: (payload: SkuDragPayload, target: ZoneCanvasDropTarget | null) => void;
   onResizePanel?: (panelId: string, widthMm: number) => void;
+  onRotatePanel?: (panelId: string, orientation: "VERTICAL" | "HORIZONTAL") => void;
 }) {
   const stageRef = React.useRef<Konva.Stage>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -94,6 +96,7 @@ export function ZoneCanvas({
 
   let cursorX = PAD;
   const resizeHandles: { panelId: string; panelX: number; panelW: number }[] = [];
+  const rotateControls: { panelId: string; panelX: number; panelW: number; orientation: "VERTICAL" | "HORIZONTAL" }[] = [];
 
   return (
     <div className="canvas-wrap" ref={containerRef} onDragOver={handleDragOver} onDrop={handleDrop}>
@@ -157,6 +160,9 @@ export function ZoneCanvas({
                         const panelW = panel.widthMm * SCALE;
                         panelCursor += panelW;
                         if (onResizePanel) resizeHandles.push({ panelId: panelNode.id, panelX, panelW });
+                        if (onRotatePanel) {
+                          rotateControls.push({ panelId: panelNode.id, panelX, panelW, orientation: panel.orientation });
+                        }
 
                         const startEdge = panelNode.edges.find((e) => (e.metadata as { side?: string } | null)?.side === "start");
                         const endEdge = panelNode.edges.find((e) => (e.metadata as { side?: string } | null)?.side === "end");
@@ -180,7 +186,7 @@ export function ZoneCanvas({
                               fill={panel.isOffcut ? "#fffbeb" : "#fafafa"}
                             />
                             <Text
-                              text={`P${panel.orderIndex}${panel.isOffcut ? " (offcut)" : ""}`}
+                              text={`P${panel.orderIndex} · ${panel.orientation === "VERTICAL" ? "V" : "H"}${panel.isOffcut ? " (offcut)" : ""}`}
                               x={panelX + 4}
                               y={PAD + ZONE_LABEL_H + 4}
                               fontSize={9}
@@ -220,26 +226,40 @@ export function ZoneCanvas({
             );
           })}
         </Layer>
-        {onResizePanel && (
+        {(onResizePanel || onRotatePanel) && (
           <Layer>
-            {resizeHandles.map(({ panelId, panelX, panelW }) => (
-              <Rect
-                key={panelId}
-                x={panelX + panelW - 3}
-                y={PAD + ZONE_LABEL_H}
-                width={6}
-                height={PANEL_H}
-                fill="#2563eb"
-                opacity={0.55}
-                draggable
-                dragBoundFunc={(pos) => ({ x: pos.x, y: PAD + ZONE_LABEL_H })}
-                onDragEnd={(e) => {
-                  const newWidthMm = Math.max(1, Math.round((e.target.x() + 3 - panelX) / SCALE));
-                  e.target.position({ x: panelX + panelW - 3, y: PAD + ZONE_LABEL_H });
-                  onResizePanel(panelId, newWidthMm);
-                }}
-              />
-            ))}
+            {onResizePanel &&
+              resizeHandles.map(({ panelId, panelX, panelW }) => (
+                <Rect
+                  key={panelId}
+                  x={panelX + panelW - 3}
+                  y={PAD + ZONE_LABEL_H}
+                  width={6}
+                  height={PANEL_H}
+                  fill="#2563eb"
+                  opacity={0.55}
+                  draggable
+                  dragBoundFunc={(pos) => ({ x: pos.x, y: PAD + ZONE_LABEL_H })}
+                  onDragEnd={(e) => {
+                    const newWidthMm = Math.max(1, Math.round((e.target.x() + 3 - panelX) / SCALE));
+                    e.target.position({ x: panelX + panelW - 3, y: PAD + ZONE_LABEL_H });
+                    onResizePanel(panelId, newWidthMm);
+                  }}
+                />
+              ))}
+            {onRotatePanel &&
+              rotateControls.map(({ panelId, panelX, panelW, orientation }) => (
+                <Text
+                  key={`rotate-${panelId}`}
+                  text="⟳"
+                  x={panelX + panelW - 16}
+                  y={PAD + ZONE_LABEL_H + 2}
+                  fontSize={13}
+                  fill="#2563eb"
+                  onClick={() => onRotatePanel(panelId, orientation === "VERTICAL" ? "HORIZONTAL" : "VERTICAL")}
+                  onTap={() => onRotatePanel(panelId, orientation === "VERTICAL" ? "HORIZONTAL" : "VERTICAL")}
+                />
+              ))}
           </Layer>
         )}
       </Stage>

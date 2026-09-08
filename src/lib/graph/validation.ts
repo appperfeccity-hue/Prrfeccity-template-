@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { ValidationIssue } from "@/lib/types";
-import { WIDTH_TOLERANCE_MM } from "@/lib/graph/constants";
+import { WIDTH_TOLERANCE_MM, CORNER_ANGLE_TOLERANCE_DEG } from "@/lib/graph/constants";
 
 const SPATIAL_ADJACENCY_TYPES = new Set(["ADJACENT_TO", "MEETS", "SHARES_BOUNDARY"]);
 
@@ -57,14 +57,24 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
         refId: wall.id,
       });
     }
-    if (wall.wallType === "L_TYPE" && wall.cornerAngleDeg == null) {
-      issues.push({
-        code: "WALL_CONFIGURED",
-        severity: "ERROR",
-        message: "L-Type wall must have a corner angle",
-        refType: "Wall",
-        refId: wall.id,
-      });
+    if (wall.wallType === "L_TYPE") {
+      if (wall.cornerAngleDeg == null) {
+        issues.push({
+          code: "WALL_CONFIGURED",
+          severity: "ERROR",
+          message: "L-Type wall must have a corner angle",
+          refType: "Wall",
+          refId: wall.id,
+        });
+      } else if (Math.abs(wall.cornerAngleDeg - 90) > CORNER_ANGLE_TOLERANCE_DEG) {
+        issues.push({
+          code: "WALL_CONFIGURED",
+          severity: "ERROR",
+          message: "L-Type wall's corner angle must be exactly 90 degrees",
+          refType: "Wall",
+          refId: wall.id,
+        });
+      }
     }
   }
 

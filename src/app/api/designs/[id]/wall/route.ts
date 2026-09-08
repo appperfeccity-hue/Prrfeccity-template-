@@ -12,9 +12,6 @@ export async function PUT(
     const { id } = await params;
     await requireDraftDesign(id);
     const body = setWallSchema.parse(await req.json());
-    if (body.wallType === "L_TYPE" && body.cornerAngleDeg === undefined) {
-      body.cornerAngleDeg = 90;
-    }
     const result = await createWall(id, body);
     return NextResponse.json(result, { status: 201 });
   } catch (err) {

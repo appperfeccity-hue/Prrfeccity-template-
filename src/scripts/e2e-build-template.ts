@@ -563,6 +563,68 @@ async function main() {
   assert(Boolean(qrLine), "quantityRule relationship produced a BOM line");
   assert(qrLine.quantity === 6, "PER_LENGTH_MM (600mm * 0.01) overrides quantity to 6, not the placed quantity of 1");
 
+  // 14. L-Type wall corner angle must be exactly 90 degrees
+  console.log("\n14. L-Type wall requires an exact 90-degree corner angle");
+  const { json: cornerDesign1 } = await api("POST", "/api/designs", { name: "E2E Corner Angle Default" });
+  const { json: cornerResult1, status: cornerStatus1 } = await api("PUT", `/api/designs/${cornerDesign1.id}/wall`, {
+    wallType: "L_TYPE",
+    lengthMm: 2000,
+    heightMm: 2400,
+  });
+  assert(cornerStatus1 === 201, "omitting cornerAngleDeg on an L-Type wall is accepted");
+  assert(cornerResult1.wall.cornerAngleDeg === 90, "omitted cornerAngleDeg defaults to 90");
+
+  const { json: cornerDesign2 } = await api("POST", "/api/designs", { name: "E2E Corner Angle Wrong" });
+  const { status: cornerStatus2 } = await api("PUT", `/api/designs/${cornerDesign2.id}/wall`, {
+    wallType: "L_TYPE",
+    lengthMm: 2000,
+    heightMm: 2400,
+    cornerAngleDeg: 45,
+  });
+  assert(cornerStatus2 === 400, "an explicit non-90 cornerAngleDeg on an L-Type wall is rejected with 400");
+
+  const { json: cornerDesign3 } = await api("POST", "/api/designs", { name: "E2E Corner Angle Correct" });
+  const { status: cornerStatus3 } = await api("PUT", `/api/designs/${cornerDesign3.id}/wall`, {
+    wallType: "L_TYPE",
+    lengthMm: 2000,
+    heightMm: 2400,
+    cornerAngleDeg: 90,
+  });
+  assert(cornerStatus3 === 201, "an explicit cornerAngleDeg of 90 on an L-Type wall is accepted");
+
+  // 15. Suggested Relationships: accepting a suggestion is a plain, explicit,
+  // client-composed create -- this proves the server-side contract that
+  // makes the compute-client-side-suggest/click-to-accept UI possible.
+  console.log("\n15. Suggested Relationships: accepting a suggestion creates a tagged ProductInstanceEdge");
+  const { json: suggDesign } = await api("POST", "/api/designs", { name: "E2E Suggested Relationships" });
+  const { json: suggParentInstance } = await api("POST", `/api/designs/${suggDesign.id}/product-instances`, {
+    skuId: await skuId("SKU-PANEL-600"),
+  });
+  const suggSkuEdgeId = await skuEdgeId("SKU-PANEL-600", "SKU-PVC-BACK-01");
+  const { json: suggChildInstance } = await api("POST", `/api/designs/${suggDesign.id}/product-instances`, {
+    skuId: await skuId("SKU-PVC-BACK-01"),
+  });
+  const { json: suggEdge, status: suggEdgeStatus } = await api(
+    "POST",
+    `/api/designs/${suggDesign.id}/product-instance-edges`,
+    {
+      fromInstanceId: suggParentInstance.id,
+      toInstanceId: suggChildInstance.id,
+      edgeType: "REQUIRES",
+      sourceSkuEdgeId: suggSkuEdgeId,
+      origin: "CATALOG_DERIVED",
+    },
+  );
+  assert(suggEdgeStatus === 201, "accepting a suggestion creates a ProductInstanceEdge");
+  assert(suggEdge.origin === "CATALOG_DERIVED", "the accepted edge is tagged origin=CATALOG_DERIVED");
+  assert(suggEdge.sourceSkuEdgeId === suggSkuEdgeId, "the accepted edge traces back to the exact catalog SkuEdge");
+
+  const { json: suggDesignAfter } = await api("GET", `/api/designs/${suggDesign.id}`);
+  const manualEdge = suggDesignAfter.productInstanceEdges.find(
+    (e: { id: string }) => e.id !== suggEdge.id,
+  );
+  assert(!manualEdge, "no other ProductInstanceEdge was silently created alongside the accepted one");
+
   console.log(`\nAll ${assertions} assertions passed.`);
 }
 

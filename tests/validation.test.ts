@@ -234,4 +234,20 @@ describe("validateDesign", () => {
 
     await deleteFixtureDesign(design.id);
   });
+
+  it("WALL_CONFIGURED flags an L-Type wall whose corner angle isn't 90 degrees (defense-in-depth)", async () => {
+    // The API-boundary Zod check (setWallSchema) rejects a bad angle before it's ever
+    // written, but this rule is what actually gates runAndPersistValidation()/publish for
+    // any row that predates that check or arrived via revise()'s deep copy -- so it must
+    // catch a bad value directly in the database too, bypassing the API layer entirely.
+    const design = await prisma.design.create({ data: { name: "Bad Corner Angle Fixture" } });
+    const { wall } = await createWall(design.id, { wallType: "L_TYPE", lengthMm: 2000, heightMm: 2400, cornerAngleDeg: 90 });
+    await prisma.wall.update({ where: { id: wall.id }, data: { cornerAngleDeg: 45 } });
+
+    const issues = await validateDesign(design.id);
+    const wallIssues = issues.filter((i) => i.code === "WALL_CONFIGURED");
+    expect(wallIssues.some((i) => i.message.includes("90"))).toBe(true);
+
+    await deleteFixtureDesign(design.id);
+  });
 });

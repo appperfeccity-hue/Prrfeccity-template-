@@ -1,83 +1,37 @@
 "use client";
 
-import { createContext, useCallback, useContext, useReducer } from "react";
-import { DEFAULT_VIEWPORT, type Viewport } from "@/lib/canvas/viewport";
+import { createContext, useCallback, useContext, useMemo, useReducer } from "react";
+import type { Viewport } from "@/lib/canvas/viewport";
+import {
+  canvasReducer,
+  initialCanvasState,
+  type CanvasLayerVisibility,
+  type CanvasSelection,
+  type CanvasSelectionItem,
+  type CanvasSelectionKind,
+  type CanvasTool,
+} from "@/lib/canvas/store-reducer";
 
-export type CanvasSelectionKind = "wall" | "zone" | "partition" | "panel" | "edge" | "instance";
-export type CanvasSelection = { kind: CanvasSelectionKind; id: string } | null;
+export type { CanvasLayerVisibility, CanvasSelection, CanvasSelectionItem, CanvasSelectionKind, CanvasTool };
 
-export type CanvasTool =
-  | "select"
-  | "pan"
-  | "draw-wall"
-  | "add-zone"
-  | "add-partition"
-  | "add-opening"
-  | "add-obstruction"
-  | "add-divider"
-  | "measure";
-
-export type CanvasLayerVisibility = {
-  grid: boolean;
-  dependencies: boolean;
-  validation: boolean;
-  furniture: boolean;
-};
-
-const DEFAULT_LAYER_VISIBILITY: CanvasLayerVisibility = {
-  grid: true,
-  dependencies: true,
-  validation: true,
-  furniture: true,
-};
-
-type CanvasState = {
+type CanvasStoreValue = {
+  /** The primary (first) selected item, or null -- the shape every M4 layer
+   * already consumes. Unaffected by whether multi-select is in use. */
   selection: CanvasSelection;
+  /** Full multi-select set (empty, one, or many items). Not yet driven by
+   * any UI in M5 -- shift-click/marquee selection is explicitly deferred --
+   * but the store, reducer, and this API already support it so that UI can
+   * be added later without touching the selection model again. */
+  selectedItems: CanvasSelectionItem[];
   activeTool: CanvasTool;
   viewport: Viewport;
   layerVisibility: CanvasLayerVisibility;
   snapEnabled: boolean;
-};
-
-const initialState: CanvasState = {
-  selection: null,
-  activeTool: "select",
-  viewport: DEFAULT_VIEWPORT,
-  layerVisibility: DEFAULT_LAYER_VISIBILITY,
-  snapEnabled: true,
-};
-
-type CanvasAction =
-  | { type: "select"; selection: CanvasSelection }
-  | { type: "setTool"; tool: CanvasTool }
-  | { type: "setViewport"; viewport: Viewport }
-  | { type: "toggleLayer"; layer: keyof CanvasLayerVisibility }
-  | { type: "toggleSnap" }
-  | { type: "reset" };
-
-function reducer(state: CanvasState, action: CanvasAction): CanvasState {
-  switch (action.type) {
-    case "select":
-      return { ...state, selection: action.selection };
-    case "setTool":
-      // Switching to a non-select tool clears the current selection -- a
-      // draw/add/measure tool operates on the canvas, not an existing object.
-      return { ...state, activeTool: action.tool, selection: action.tool === "select" ? state.selection : null };
-    case "setViewport":
-      return { ...state, viewport: action.viewport };
-    case "toggleLayer":
-      return { ...state, layerVisibility: { ...state.layerVisibility, [action.layer]: !state.layerVisibility[action.layer] } };
-    case "toggleSnap":
-      return { ...state, snapEnabled: !state.snapEnabled };
-    case "reset":
-      return initialState;
-    default:
-      return state;
-  }
-}
-
-type CanvasStoreValue = CanvasState & {
   select: (selection: CanvasSelection) => void;
+  selectMultiple: (items: CanvasSelectionItem[]) => void;
+  addToSelection: (item: CanvasSelectionItem) => void;
+  toggleInSelection: (item: CanvasSelectionItem) => void;
+  clearSelection: () => void;
   setTool: (tool: CanvasTool) => void;
   setViewport: (viewport: Viewport) => void;
   toggleLayer: (layer: keyof CanvasLayerVisibility) => void;
@@ -88,16 +42,55 @@ type CanvasStoreValue = CanvasState & {
 const CanvasStoreContext = createContext<CanvasStoreValue | null>(null);
 
 export function CanvasStoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(canvasReducer, initialCanvasState);
 
   const select = useCallback((selection: CanvasSelection) => dispatch({ type: "select", selection }), []);
+  const selectMultiple = useCallback((items: CanvasSelectionItem[]) => dispatch({ type: "selectMultiple", items }), []);
+  const addToSelection = useCallback((item: CanvasSelectionItem) => dispatch({ type: "addToSelection", item }), []);
+  const toggleInSelection = useCallback((item: CanvasSelectionItem) => dispatch({ type: "toggleInSelection", item }), []);
+  const clearSelection = useCallback(() => dispatch({ type: "clearSelection" }), []);
   const setTool = useCallback((tool: CanvasTool) => dispatch({ type: "setTool", tool }), []);
   const setViewport = useCallback((viewport: Viewport) => dispatch({ type: "setViewport", viewport }), []);
   const toggleLayer = useCallback((layer: keyof CanvasLayerVisibility) => dispatch({ type: "toggleLayer", layer }), []);
   const toggleSnap = useCallback(() => dispatch({ type: "toggleSnap" }), []);
   const reset = useCallback(() => dispatch({ type: "reset" }), []);
 
-  const value: CanvasStoreValue = { ...state, select, setTool, setViewport, toggleLayer, toggleSnap, reset };
+  const selection = state.selectedItems[0] ?? null;
+
+  const value: CanvasStoreValue = useMemo(
+    () => ({
+      selection,
+      selectedItems: state.selectedItems,
+      activeTool: state.activeTool,
+      viewport: state.viewport,
+      layerVisibility: state.layerVisibility,
+      snapEnabled: state.snapEnabled,
+      select,
+      selectMultiple,
+      addToSelection,
+      toggleInSelection,
+      clearSelection,
+      setTool,
+      setViewport,
+      toggleLayer,
+      toggleSnap,
+      reset,
+    }),
+    [
+      state,
+      selection,
+      select,
+      selectMultiple,
+      addToSelection,
+      toggleInSelection,
+      clearSelection,
+      setTool,
+      setViewport,
+      toggleLayer,
+      toggleSnap,
+      reset,
+    ],
+  );
 
   return <CanvasStoreContext.Provider value={value}>{children}</CanvasStoreContext.Provider>;
 }

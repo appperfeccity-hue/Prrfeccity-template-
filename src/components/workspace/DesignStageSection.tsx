@@ -6,32 +6,46 @@ import { api } from "@/lib/api/client";
 import { useUndoRedo } from "@/lib/undo-redo";
 import { useCanvasStore } from "@/lib/canvas/store";
 import { useKeyboardShortcuts } from "@/lib/canvas/keyboard";
+import {
+  buildInstanceMoveInput,
+  buildInstanceQuantityInput,
+  buildInstanceRotateInput,
+  buildPanelResizeInput,
+  buildPanelRotateInput,
+} from "@/lib/canvas/mutations";
 import { DesignStage, type DesignStageDropTarget } from "@/components/canvas/DesignStage";
-import { EdgeInspectorPanel } from "@/components/canvas/EdgeInspectorPanel";
+import { Inspector } from "@/components/inspector/Inspector";
 import { SkuPalette, type SkuDragPayload } from "@/components/palette/SkuPalette";
 
 const DROP_RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOUNDARY_OF", "POSITIONED_AT", "ADJACENT_TO"];
 
 /**
- * UI-M4: the unified DesignStage, mounted alongside (not replacing) the
- * existing Wall/Zones & Panels/Furniture sections' own canvases, per the
- * explicit instruction to verify the new canvas against the old rendering
- * before switching the workspace over. Owns the same mutation set as
- * ZonesSection/FurnitureSection (resize/rotate panel, auto-fill, link-drop,
- * place/move/rotate furniture) -- this is intentional, temporary
+ * UI-M4/M5: the unified DesignStage + generalized Inspector, mounted
+ * alongside (not replacing) the existing Wall/Zones & Panels/Furniture
+ * sections' own canvases, per the explicit instruction to verify the new
+ * canvas against the old rendering before the M6 cutover. Owns the same
+ * mutation set as ZonesSection/FurnitureSection -- intentional, temporary
  * duplication for the parallel-verification window; once the old canvases
- * are removed in a follow-up step, one of the two copies goes with them.
+ * are removed at M6, one of the two copies goes with them.
+ *
+ * Every resize/rotate/move/quantity mutation is built from the shared pure
+ * functions in src/lib/canvas/mutations.ts and called from exactly one
+ * useMutation instance per kind of edit -- both DesignStage's own
+ * interactions (drag/click) and the Inspector's input fields invoke the
+ * same callback, so there is exactly one code path per mutation, never two
+ * competing ones.
  */
 export function DesignStageSection({ designId: id }: { designId: string }) {
   const queryClient = useQueryClient();
   const { pushAction } = useUndoRedo();
-  const { selection, select } = useCanvasStore();
+  const { selection, clearSelection } = useCanvasStore();
   useKeyboardShortcuts();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
   const skusQuery = useQuery({ queryKey: ["skus"], queryFn: () => api.listSkus() });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["design", id] });
   const design = designQuery.data;
+  const isDraft = design?.status === "DRAFT";
 
   const [pendingDrop, setPendingDrop] = useState<{ payload: SkuDragPayload; target: { kind: "panel" | "edge"; id: string } } | null>(null);
   const [dropRelationshipType, setDropRelationshipType] = useState(DROP_RELATIONSHIP_TYPES[0]);
@@ -39,18 +53,17 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   const furnitureSkus = (skusQuery.data ?? []).filter((s) => s.category.key === "FURNITURE");
 
   const resizePanelMutation = useMutation({
-    mutationFn: ({ panelId, widthMm }: { panelId: string; widthMm: number; previousWidthMm: number }) =>
-      api.updatePanel(id, panelId, { widthMm }),
-    onSuccess: (_result, variables) => {
+    mutationFn: (input: ReturnType<typeof buildPanelResizeInput>) => api.updatePanel(id, input.panelId, { widthMm: input.widthMm }),
+    onSuccess: (_result, input) => {
       invalidate();
       pushAction({
-        description: `Resize panel to ${variables.widthMm}mm`,
+        description: `Resize panel to ${input.widthMm}mm`,
         undo: async () => {
-          await api.updatePanel(id, variables.panelId, { widthMm: variables.previousWidthMm });
+          await api.updatePanel(id, input.panelId, { widthMm: input.previousWidthMm });
           invalidate();
         },
         redo: async () => {
-          await api.updatePanel(id, variables.panelId, { widthMm: variables.widthMm });
+          await api.updatePanel(id, input.panelId, { widthMm: input.widthMm });
           invalidate();
         },
       });
@@ -58,18 +71,17 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   });
 
   const rotatePanelMutation = useMutation({
-    mutationFn: ({ panelId, orientation }: { panelId: string; orientation: "VERTICAL" | "HORIZONTAL"; previousOrientation: "VERTICAL" | "HORIZONTAL" }) =>
-      api.updatePanel(id, panelId, { orientation }),
-    onSuccess: (_result, variables) => {
+    mutationFn: (input: ReturnType<typeof buildPanelRotateInput>) => api.updatePanel(id, input.panelId, { orientation: input.orientation }),
+    onSuccess: (_result, input) => {
       invalidate();
       pushAction({
-        description: `Rotate panel to ${variables.orientation}`,
+        description: `Rotate panel to ${input.orientation}`,
         undo: async () => {
-          await api.updatePanel(id, variables.panelId, { orientation: variables.previousOrientation });
+          await api.updatePanel(id, input.panelId, { orientation: input.previousOrientation });
           invalidate();
         },
         redo: async () => {
-          await api.updatePanel(id, variables.panelId, { orientation: variables.orientation });
+          await api.updatePanel(id, input.panelId, { orientation: input.orientation });
           invalidate();
         },
       });
@@ -161,18 +173,17 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   });
 
   const moveFurnitureMutation = useMutation({
-    mutationFn: ({ instanceId, x, y }: { instanceId: string; x: number; y: number; previousX: number; previousY: number }) =>
-      api.updateProductInstance(id, instanceId, { x, y }),
-    onSuccess: (_result, variables) => {
+    mutationFn: (input: ReturnType<typeof buildInstanceMoveInput>) => api.updateProductInstance(id, input.instanceId, { x: input.x, y: input.y }),
+    onSuccess: (_result, input) => {
       invalidate();
       pushAction({
         description: `Move furniture`,
         undo: async () => {
-          await api.updateProductInstance(id, variables.instanceId, { x: variables.previousX, y: variables.previousY });
+          await api.updateProductInstance(id, input.instanceId, { x: input.previousX, y: input.previousY });
           invalidate();
         },
         redo: async () => {
-          await api.updateProductInstance(id, variables.instanceId, { x: variables.x, y: variables.y });
+          await api.updateProductInstance(id, input.instanceId, { x: input.x, y: input.y });
           invalidate();
         },
       });
@@ -180,18 +191,54 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   });
 
   const rotateFurnitureMutation = useMutation({
-    mutationFn: ({ instanceId, rotationDeg }: { instanceId: string; rotationDeg: number; previousRotationDeg: number }) =>
-      api.updateProductInstance(id, instanceId, { rotationDeg }),
-    onSuccess: (_result, variables) => {
+    mutationFn: (input: ReturnType<typeof buildInstanceRotateInput>) => api.updateProductInstance(id, input.instanceId, { rotationDeg: input.rotationDeg }),
+    onSuccess: (_result, input) => {
       invalidate();
       pushAction({
         description: `Rotate furniture`,
         undo: async () => {
-          await api.updateProductInstance(id, variables.instanceId, { rotationDeg: variables.previousRotationDeg });
+          await api.updateProductInstance(id, input.instanceId, { rotationDeg: input.previousRotationDeg });
           invalidate();
         },
         redo: async () => {
-          await api.updateProductInstance(id, variables.instanceId, { rotationDeg: variables.rotationDeg });
+          await api.updateProductInstance(id, input.instanceId, { rotationDeg: input.rotationDeg });
+          invalidate();
+        },
+      });
+    },
+  });
+
+  const updateQuantityMutation = useMutation({
+    mutationFn: (input: ReturnType<typeof buildInstanceQuantityInput>) => api.updateProductInstance(id, input.instanceId, { quantity: input.quantity }),
+    onSuccess: (_result, input) => {
+      invalidate();
+      pushAction({
+        description: `Set quantity to ${input.quantity}`,
+        undo: async () => {
+          await api.updateProductInstance(id, input.instanceId, { quantity: input.previousQuantity });
+          invalidate();
+        },
+        redo: async () => {
+          await api.updateProductInstance(id, input.instanceId, { quantity: input.quantity });
+          invalidate();
+        },
+      });
+    },
+  });
+
+  const updateZMutation = useMutation({
+    mutationFn: ({ instanceId, z }: { instanceId: string; z: number; previousZ: number }) =>
+      api.updateProductInstance(id, instanceId, { z }),
+    onSuccess: (_result, variables) => {
+      invalidate();
+      pushAction({
+        description: `Set Z to ${variables.z}mm`,
+        undo: async () => {
+          await api.updateProductInstance(id, variables.instanceId, { z: variables.previousZ });
+          invalidate();
+        },
+        redo: async () => {
+          await api.updateProductInstance(id, variables.instanceId, { z: variables.z });
           invalidate();
         },
       });
@@ -200,10 +247,49 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
 
   if (!design) return null;
 
-  const selectedEdge =
-    selection?.kind === "edge"
-      ? design.geometryNodes.flatMap((n) => n.edges).find((e) => e.id === selection.id)
-      : undefined;
+  const findPanel = (panelId: string) => design.geometryNodes.find((n) => n.id === panelId)?.panel;
+  const findInstance = (instanceId: string) => design.productInstances.find((i) => i.id === instanceId);
+
+  const handleResizePanel = (panelId: string, widthMm: number) => {
+    const previousWidthMm = findPanel(panelId)?.widthMm;
+    if (previousWidthMm == null) return;
+    resizePanelMutation.mutate(buildPanelResizeInput(panelId, widthMm, previousWidthMm));
+  };
+
+  const handleRotatePanel = (panelId: string, orientation: "VERTICAL" | "HORIZONTAL") => {
+    const previousOrientation = findPanel(panelId)?.orientation;
+    if (previousOrientation == null) return;
+    rotatePanelMutation.mutate(buildPanelRotateInput(panelId, orientation, previousOrientation));
+  };
+
+  const handleMoveFurniture = (instanceId: string, xMm: number, yMm: number) => {
+    const inst = findInstance(instanceId);
+    if (!inst) return;
+    moveFurnitureMutation.mutate(buildInstanceMoveInput(instanceId, xMm, yMm, inst.x, inst.y));
+  };
+
+  const handleRotateFurniture = (instanceId: string, rotationDeg: number) => {
+    const inst = findInstance(instanceId);
+    if (!inst) return;
+    rotateFurnitureMutation.mutate(buildInstanceRotateInput(instanceId, rotationDeg, inst.rotationDeg));
+  };
+
+  const handleUpdateQuantity = (instanceId: string, quantity: number) => {
+    const inst = findInstance(instanceId);
+    if (!inst) return;
+    updateQuantityMutation.mutate(buildInstanceQuantityInput(instanceId, quantity, inst.quantity));
+  };
+
+  const handleUpdateZ = (instanceId: string, z: number) => {
+    const inst = findInstance(instanceId);
+    if (!inst) return;
+    updateZMutation.mutate({ instanceId, z, previousZ: inst.z ?? 0 });
+  };
+
+  const handleDeleteZone = (zoneId: string) => api.deleteZone(id, zoneId).then(invalidate);
+  const handleDeletePartition = (partitionId: string) => api.deleteGeometryNode(id, partitionId).then(invalidate);
+  const handleDeletePanel = (panelId: string) => api.deleteGeometryNode(id, panelId).then(invalidate);
+  const handleDeleteInstance = (instanceId: string) => api.deleteProductInstance(id, instanceId).then(invalidate);
 
   const handleDropSku = (payload: SkuDragPayload, target: DesignStageDropTarget | null, mm: { x: number; y: number }) => {
     if (payload.categoryKey === "FURNITURE") {
@@ -244,32 +330,37 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
             /* selection already written into the canvas store by DesignStage itself */
           }}
           onDropSku={handleDropSku}
-          onResizePanel={(panelId, widthMm) => {
-            const previousWidthMm = design.geometryNodes.find((n) => n.id === panelId)?.panel?.widthMm;
-            if (previousWidthMm == null) return;
-            resizePanelMutation.mutate({ panelId, widthMm, previousWidthMm });
-          }}
-          onRotatePanel={(panelId, orientation) => {
-            const previousOrientation = design.geometryNodes.find((n) => n.id === panelId)?.panel?.orientation;
-            if (previousOrientation == null) return;
-            rotatePanelMutation.mutate({ panelId, orientation, previousOrientation });
-          }}
+          onResizePanel={handleResizePanel}
+          onRotatePanel={handleRotatePanel}
           onPlaceFurniture={(xMm, yMm) => {
             if (!selectedFurnitureSkuId) return;
             placeFurnitureMutation.mutate({ skuId: selectedFurnitureSkuId, x: xMm, y: yMm });
           }}
-          onMoveFurniture={(instanceId, xMm, yMm) => {
-            const inst = design.productInstances.find((i) => i.id === instanceId);
-            if (!inst) return;
-            moveFurnitureMutation.mutate({ instanceId, x: xMm, y: yMm, previousX: inst.x ?? 0, previousY: inst.y ?? 0 });
-          }}
-          onRotateFurniture={(instanceId, rotationDeg) => {
-            const inst = design.productInstances.find((i) => i.id === instanceId);
-            if (!inst) return;
-            rotateFurnitureMutation.mutate({ instanceId, rotationDeg, previousRotationDeg: inst.rotationDeg ?? 0 });
-          }}
+          onMoveFurniture={handleMoveFurniture}
+          onRotateFurniture={handleRotateFurniture}
         />
-        <SkuPalette skus={skusQuery.data ?? []} />
+        <div className="flex flex-col gap-3">
+          {selection && (
+            <Inspector
+              designId={id}
+              design={design}
+              selection={selection}
+              isDraft={Boolean(isDraft)}
+              onClose={clearSelection}
+              onResizePanel={handleResizePanel}
+              onRotatePanel={handleRotatePanel}
+              onDeletePanel={(panelId) => handleDeletePanel(panelId)}
+              onMoveFurniture={handleMoveFurniture}
+              onRotateFurniture={handleRotateFurniture}
+              onUpdateInstanceQuantity={handleUpdateQuantity}
+              onUpdateInstanceZ={handleUpdateZ}
+              onDeleteInstance={(instanceId) => handleDeleteInstance(instanceId)}
+              onDeleteZone={(zoneId) => handleDeleteZone(zoneId)}
+              onDeletePartition={(partitionId) => handleDeletePartition(partitionId)}
+            />
+          )}
+          <SkuPalette skus={skusQuery.data ?? []} />
+        </div>
       </div>
 
       {autoFillMutation.isError && <p className="issue-error">{(autoFillMutation.error as Error).message}</p>}
@@ -318,8 +409,6 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
           {linkDropMutation.isError && <p className="issue-error">{(linkDropMutation.error as Error).message}</p>}
         </div>
       )}
-
-      {selectedEdge && <EdgeInspectorPanel designId={id} edge={selectedEdge} onClose={() => select(null)} />}
     </div>
   );
 }

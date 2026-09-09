@@ -22,7 +22,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
  */
 export function useKeyboardShortcuts() {
   const { undo, redo, canUndo, canRedo, isProcessing } = useUndoRedo();
-  const { activeTool, setTool, select } = useCanvasStore();
+  const { activeTool, setTool, clearSelection } = useCanvasStore();
   const [modifiers, setModifiers] = useState<KeyboardModifiers>({ shift: false, alt: false });
   const spaceActiveRef = useRef(false);
   const preSpaceToolRef = useRef<typeof activeTool>("select");
@@ -47,7 +47,7 @@ export function useKeyboardShortcuts() {
 
       if (e.key === "Escape") {
         setTool("select");
-        select(null);
+        clearSelection();
         return;
       }
 
@@ -74,7 +74,7 @@ export function useKeyboardShortcuts() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [undo, redo, canUndo, canRedo, isProcessing, setTool, activeTool, select]);
+  }, [undo, redo, canUndo, canRedo, isProcessing, setTool, activeTool, clearSelection]);
 
   return modifiers;
 }

@@ -16,13 +16,13 @@ function isTypingTarget(target: EventTarget | null): boolean {
  * Global keyboard shortcuts for the Design workspace: Cmd/Ctrl+Z undo,
  * Cmd/Ctrl+Shift+Z redo (both call straight into the existing useUndoRedo()
  * context -- no separate undo mechanism), Escape resets the active tool to
- * "select", Space temporarily switches to the pan tool while held. Returns
- * live Shift/Alt state for drag handlers that need to read movement
- * modifiers (constrain / duplicate).
+ * "select" AND clears the current canvas selection, Space temporarily
+ * switches to the pan tool while held. Returns live Shift/Alt state for drag
+ * handlers that need to read movement modifiers (constrain / duplicate).
  */
 export function useKeyboardShortcuts() {
   const { undo, redo, canUndo, canRedo, isProcessing } = useUndoRedo();
-  const { activeTool, setTool } = useCanvasStore();
+  const { activeTool, setTool, select } = useCanvasStore();
   const [modifiers, setModifiers] = useState<KeyboardModifiers>({ shift: false, alt: false });
   const spaceActiveRef = useRef(false);
   const preSpaceToolRef = useRef<typeof activeTool>("select");
@@ -47,6 +47,7 @@ export function useKeyboardShortcuts() {
 
       if (e.key === "Escape") {
         setTool("select");
+        select(null);
         return;
       }
 
@@ -73,7 +74,7 @@ export function useKeyboardShortcuts() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [undo, redo, canUndo, canRedo, isProcessing, setTool, activeTool]);
+  }, [undo, redo, canUndo, canRedo, isProcessing, setTool, activeTool, select]);
 
   return modifiers;
 }

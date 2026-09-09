@@ -5,6 +5,7 @@ import { WallSection } from "@/components/workspace/WallSection";
 import { ZonesSection } from "@/components/workspace/ZonesSection";
 import { ProductsSection } from "@/components/workspace/ProductsSection";
 import { FurnitureSection } from "@/components/workspace/FurnitureSection";
+import { DesignStageSection } from "@/components/workspace/DesignStageSection";
 
 /**
  * Design workspace -- UI-M3: the shell/routing restructure lands first, with
@@ -19,6 +20,17 @@ export default function DesignWorkspacePage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="flex flex-col gap-8">
+      <section>
+        <h2 className="text-sm font-semibold text-foreground/60 uppercase tracking-wide mb-2">
+          Unified Canvas (preview)
+        </h2>
+        <p className="text-xs text-foreground/50 mb-2">
+          UI-M4: the new single-stage canvas, shown here for comparison against the sections below before they&apos;re
+          replaced. Renders the same design graph -- try zoom/pan, selecting a zone/partition/panel/edge, dragging a
+          SKU from the palette, and moving/rotating furniture.
+        </p>
+        <DesignStageSection designId={id} />
+      </section>
       <section>
         <h2 className="text-sm font-semibold text-foreground/60 uppercase tracking-wide mb-2">Wall</h2>
         <WallSection designId={id} />

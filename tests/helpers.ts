@@ -11,6 +11,24 @@ async function skuIdByCode(code: string) {
   return sku.id;
 }
 
+async function furnitureDesignOptionId(skuCode: string, key: string) {
+  const skuId = await skuIdByCode(skuCode);
+  const row = await prisma.furnitureDesignOption.findFirstOrThrow({ where: { skuId, key } });
+  return row.id;
+}
+
+async function furnitureColourOptionId(skuCode: string, key: string) {
+  const skuId = await skuIdByCode(skuCode);
+  const row = await prisma.furnitureColourOption.findFirstOrThrow({ where: { skuId, key } });
+  return row.id;
+}
+
+async function furnitureSizeOptionId(skuCode: string, key: string) {
+  const skuId = await skuIdByCode(skuCode);
+  const row = await prisma.furnitureSizeOption.findFirstOrThrow({ where: { skuId, key } });
+  return row.id;
+}
+
 async function skuEdgeId(
   fromCode: string,
   toCode: string,
@@ -92,6 +110,9 @@ export async function buildValidTemplateFixture() {
     x: 100,
     y: 100,
     quantity: 1,
+    designOptionId: await furnitureDesignOptionId("SKU-FURN-VANITY-01", "CLASSIC"),
+    colourOptionId: await furnitureColourOptionId("SKU-FURN-VANITY-01", "WHITE"),
+    sizeOptionId: await furnitureSizeOptionId("SKU-FURN-VANITY-01", "SMALL"),
   });
 
   const relTrim = await createGeometryProductRelationship(design.id, {
@@ -181,7 +202,10 @@ export async function snapshotSemanticState(designId: string) {
       prisma.panel.findMany({ where: { designId } }),
       prisma.geometryEdge.findMany({ where: { designId } }),
       prisma.geometryEdgeRelationship.findMany({ where: { designId } }),
-      prisma.productInstance.findMany({ where: { designId }, include: { sku: true } }),
+      prisma.productInstance.findMany({
+        where: { designId },
+        include: { sku: true, designOption: true, colourOption: true, sizeOption: true },
+      }),
       prisma.productInstanceEdge.findMany({ where: { designId } }),
       prisma.geometryProductRelationship.findMany({ where: { designId } }),
       prisma.templateParameter.findMany({ where: { templateId: designId }, include: { permission: true } }),
@@ -286,6 +310,9 @@ export async function snapshotSemanticState(designId: string) {
         z: inst.z,
         rotationDeg: inst.rotationDeg,
         quantity: inst.quantity,
+        designOptionKey: inst.designOption?.key ?? null,
+        colourOptionKey: inst.colourOption?.key ?? null,
+        sizeOptionKey: inst.sizeOption?.key ?? null,
       })),
     ),
     productInstanceEdges: instanceEdges

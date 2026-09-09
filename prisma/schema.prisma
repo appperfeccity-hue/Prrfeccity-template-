@@ -273,12 +273,70 @@ model SkuMaster {
   defaultUnit    String   @default("EA")
   minCutPieceMm  Float?
   attributes     Json?
+  // Whether a ProductInstance of this SKU may ever have its rotationDeg
+  // changed from 0. Enforced server-side in updateProductInstance, not just
+  // hidden in the UI -- a catalogue-driven furniture piece (e.g. a
+  // wall-fixed unit) may simply not be an approved rotate target.
+  rotatable      Boolean  @default(true)
 
-  edgesFrom        SkuEdge[]         @relation("SkuEdgeFrom")
-  edgesTo          SkuEdge[]         @relation("SkuEdgeTo")
+  edgesFrom        SkuEdge[]               @relation("SkuEdgeFrom")
+  edgesTo          SkuEdge[]               @relation("SkuEdgeTo")
   productInstances ProductInstance[]
+  designOptions    FurnitureDesignOption[]
+  colourOptions    FurnitureColourOption[]
+  sizeOptions      FurnitureSizeOption[]
 
   @@index([categoryId])
+}
+
+// The Furniture Catalogue's selectable option groups. SKU-scoped (not a
+// shared cross-SKU pool) because FurnitureSizeOption's dimensions are
+// inherently per-product -- "Large" means something different on a sofa vs.
+// a stool. Design/Colour are kept SKU-scoped too for the same simple,
+// single-model shape; a shared swatch library is a clean future extension
+// if ever needed, not required by the current catalogue-driven workflow.
+model FurnitureDesignOption {
+  id    String    @id @default(cuid())
+  skuId String
+  sku   SkuMaster @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  key   String
+  label String
+
+  instances ProductInstance[] @relation("InstanceDesignOption")
+
+  @@unique([skuId, key])
+}
+
+model FurnitureColourOption {
+  id          String    @id @default(cuid())
+  skuId       String
+  sku         SkuMaster @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  key         String
+  label       String
+  swatchColor String
+
+  instances ProductInstance[] @relation("InstanceColourOption")
+
+  @@unique([skuId, key])
+}
+
+// The one place fixed physical dimensions for a furniture configuration
+// live. Never copied onto ProductInstance -- "SKU + Design + Colour + Size
+// -> fixed configuration" stays a single source of truth, read live through
+// the selection, not cached.
+model FurnitureSizeOption {
+  id       String    @id @default(cuid())
+  skuId    String
+  sku      SkuMaster @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  key      String
+  label    String
+  widthMm  Float
+  depthMm  Float
+  heightMm Float
+
+  instances ProductInstance[] @relation("InstanceSizeOption")
+
+  @@unique([skuId, key])
 }
 
 enum SkuEdgeType {
@@ -320,6 +378,17 @@ model ProductInstance {
   z              Float?
   rotationDeg    Float         @default(0)
   quantity       Float         @default(1)
+
+  // The catalogue-selected configuration for a furniture placement (see
+  // FurnitureDesignOption/FurnitureColourOption/FurnitureSizeOption above).
+  // Null for non-furniture instances, or for a furniture SKU that defines no
+  // options in that group.
+  designOptionId String?
+  designOption   FurnitureDesignOption? @relation("InstanceDesignOption", fields: [designOptionId], references: [id])
+  colourOptionId String?
+  colourOption   FurnitureColourOption? @relation("InstanceColourOption", fields: [colourOptionId], references: [id])
+  sizeOptionId   String?
+  sizeOption     FurnitureSizeOption?   @relation("InstanceSizeOption", fields: [sizeOptionId], references: [id])
 
   edgesFrom                    ProductInstanceEdge[]         @relation("InstanceEdgeFrom")
   edgesTo                      ProductInstanceEdge[]         @relation("InstanceEdgeTo")

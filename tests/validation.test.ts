@@ -250,4 +250,45 @@ describe("validateDesign", () => {
 
     await deleteFixtureDesign(design.id);
   });
+
+  it("FURNITURE_CONFIGURATION_COMPLETE flags a furniture instance with no Size selected, when its SKU defines sizes", async () => {
+    const design = await prisma.design.create({ data: { name: "Furniture Missing Size Fixture" } });
+    const vanitySku = await prisma.skuMaster.findUniqueOrThrow({ where: { code: "SKU-FURN-VANITY-01" } });
+
+    await createProductInstance(design.id, { skuId: vanitySku.id, x: 0, y: 0, quantity: 1 });
+
+    const issues = await validateDesign(design.id);
+    expect(issues.some((i) => i.code === "FURNITURE_CONFIGURATION_COMPLETE")).toBe(true);
+
+    await deleteFixtureDesign(design.id);
+  });
+
+  it("FURNITURE_CONFIGURATION_COMPLETE clears once a Size is selected", async () => {
+    const design = await prisma.design.create({ data: { name: "Furniture With Size Fixture" } });
+    const vanitySku = await prisma.skuMaster.findUniqueOrThrow({ where: { code: "SKU-FURN-VANITY-01" } });
+    const sizeOption = await prisma.furnitureSizeOption.findFirstOrThrow({ where: { skuId: vanitySku.id } });
+
+    await createProductInstance(design.id, { skuId: vanitySku.id, x: 0, y: 0, quantity: 1, sizeOptionId: sizeOption.id });
+
+    const issues = await validateDesign(design.id);
+    expect(issues.some((i) => i.code === "FURNITURE_CONFIGURATION_COMPLETE")).toBe(false);
+
+    await deleteFixtureDesign(design.id);
+  });
+
+  it("FURNITURE_CONFIGURATION_COMPLETE does not apply to a furniture SKU with no catalogue Size options at all", async () => {
+    const design = await prisma.design.create({ data: { name: "Furniture No-Size-Catalogue Fixture" } });
+    const furnitureCategory = await prisma.category.findUniqueOrThrow({ where: { key: "FURNITURE" } });
+    const noSizeSku = await prisma.skuMaster.create({
+      data: { code: "SKU-FURN-TEST-NO-SIZE", name: "Test Furniture (no sizes)", categoryId: furnitureCategory.id },
+    });
+
+    await createProductInstance(design.id, { skuId: noSizeSku.id, x: 0, y: 0, quantity: 1 });
+
+    const issues = await validateDesign(design.id);
+    expect(issues.some((i) => i.code === "FURNITURE_CONFIGURATION_COMPLETE")).toBe(false);
+
+    await deleteFixtureDesign(design.id);
+    await prisma.skuMaster.delete({ where: { id: noSizeSku.id } });
+  });
 });

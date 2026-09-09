@@ -2,6 +2,9 @@ import type {
   CategoryModel as Category,
   DesignModel as Design,
   DesignValidationResultModel as DesignValidationResult,
+  FurnitureColourOptionModel as FurnitureColourOption,
+  FurnitureDesignOptionModel as FurnitureDesignOption,
+  FurnitureSizeOptionModel as FurnitureSizeOption,
   GeometryEdgeModel as GeometryEdge,
   GeometryEdgeRelationshipModel as GeometryEdgeRelationship,
   GeometryNodeModel as GeometryNode,
@@ -38,12 +41,22 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export type { Look };
 
-export type SkuWithCategory = SkuMaster & { category: Category };
+export type SkuWithCategory = SkuMaster & {
+  category: Category;
+  designOptions: FurnitureDesignOption[];
+  colourOptions: FurnitureColourOption[];
+  sizeOptions: FurnitureSizeOption[];
+};
 
 export type FullDesign = Design & {
   geometryNodes: (GeometryNode & { wall: Wall | null; zone: Zone | null; partition: ZonePartition | null; panel: Panel | null; edges: GeometryEdge[] })[];
   geometryEdgeRelationships: GeometryEdgeRelationship[];
-  productInstances: (ProductInstance & { sku: SkuWithCategory })[];
+  productInstances: (ProductInstance & {
+    sku: SkuWithCategory;
+    designOption: FurnitureDesignOption | null;
+    colourOption: FurnitureColourOption | null;
+    sizeOption: FurnitureSizeOption | null;
+  })[];
   productInstanceEdges: ProductInstanceEdge[];
   geometryProductRelationships: GeometryProductRelationship[];
   templateParameters: (TemplateParameter & { permission: ConsultantPermission | null })[];
@@ -170,13 +183,25 @@ export const api = {
       z?: number;
       rotationDeg?: number;
       quantity?: number;
+      designOptionId?: string;
+      colourOptionId?: string;
+      sizeOptionId?: string;
     },
   ) => request<ProductInstance>("POST", `/designs/${id}/product-instances`, data),
 
   updateProductInstance: (
     id: string,
     instanceId: string,
-    data: { x?: number; y?: number; z?: number; rotationDeg?: number; quantity?: number },
+    data: {
+      x?: number;
+      y?: number;
+      z?: number;
+      rotationDeg?: number;
+      quantity?: number;
+      designOptionId?: string;
+      colourOptionId?: string;
+      sizeOptionId?: string;
+    },
   ) => request<ProductInstance>("PATCH", `/designs/${id}/product-instances/${instanceId}`, data),
 
   deleteProductInstance: (id: string, instanceId: string) =>

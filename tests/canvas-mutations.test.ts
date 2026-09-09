@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildInstanceMoveInput,
+  buildInstanceOptionsInput,
   buildInstanceQuantityInput,
   buildInstanceRotateInput,
   buildPanelResizeInput,
@@ -78,7 +79,7 @@ describe("buildInstanceRotateInput (furniture rotation)", () => {
   });
 });
 
-describe("buildInstanceQuantityInput (furniture 'resize' -- the only real sizing field ProductInstance has)", () => {
+describe("buildInstanceQuantityInput (plain instance count -- NOT a geometric resize; furniture sizing is a catalogue Size-option change, see buildInstanceOptionsInput below)", () => {
   it("clamps to a small positive minimum instead of allowing zero/negative", () => {
     expect(buildInstanceQuantityInput("i1", 0, 1).quantity).toBeGreaterThan(0);
     expect(buildInstanceQuantityInput("i1", -5, 1).quantity).toBeGreaterThan(0);
@@ -90,6 +91,30 @@ describe("buildInstanceQuantityInput (furniture 'resize' -- the only real sizing
 
   it("never includes a skuId field", () => {
     expect(buildInstanceQuantityInput("i1", 2, 1)).not.toHaveProperty("skuId");
+  });
+});
+
+describe("buildInstanceOptionsInput (furniture catalogue configuration change -- Design/Colour/Size, never a resize)", () => {
+  it("carries the requested next options and the prior ones for undo", () => {
+    expect(
+      buildInstanceOptionsInput("i1", { sizeOptionId: "size-large" }, { sizeOptionId: "size-small" }),
+    ).toEqual({
+      instanceId: "i1",
+      next: { sizeOptionId: "size-large" },
+      previous: { sizeOptionId: "size-small" },
+    });
+  });
+
+  it("omits unspecified option groups rather than nulling them out", () => {
+    const result = buildInstanceOptionsInput("i1", { colourOptionId: "colour-walnut" }, {});
+    expect(result.next).not.toHaveProperty("sizeOptionId");
+    expect(result.next).not.toHaveProperty("designOptionId");
+  });
+
+  it("never includes a skuId field -- a catalogue option change never swaps the underlying SKU", () => {
+    const result = buildInstanceOptionsInput("i1", { sizeOptionId: "size-large" }, {});
+    expect(result).not.toHaveProperty("skuId");
+    expect(result.next).not.toHaveProperty("skuId");
   });
 });
 

@@ -14,6 +14,9 @@ export async function GET(
         category: true,
         edgesFrom: { include: { toSku: true } },
         edgesTo: { include: { fromSku: true } },
+        designOptions: true,
+        colourOptions: true,
+        sizeOptions: true,
       },
     });
     if (!sku) throw notFound(`SKU ${id} not found`);

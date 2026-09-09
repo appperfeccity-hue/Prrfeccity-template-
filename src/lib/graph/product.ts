@@ -1,11 +1,39 @@
 import { prisma } from "@/lib/prisma";
-import { badRequest } from "@/lib/api/errors";
+import { badRequest, notFound } from "@/lib/api/errors";
 import type {
   GeometryProductRelationshipType,
   Prisma,
   RelationshipOrigin,
   SkuEdgeType,
 } from "@/generated/prisma/client";
+
+type FurnitureOptionIds = {
+  designOptionId?: string | null;
+  colourOptionId?: string | null;
+  sizeOptionId?: string | null;
+};
+
+// Enforces "cannot change to an unapproved SKU/option" -- every given option
+// id must belong to the instance's own SKU. This is the concrete guard
+// behind the domain rule "SKU + Design + Colour + Size -> fixed
+// configuration" -- the Canvas/Inspector may only pick from the approved
+// catalogue, never assemble an arbitrary combination.
+async function assertOptionsBelongToSku(skuId: string, options: FurnitureOptionIds) {
+  const [design, colour, size] = await Promise.all([
+    options.designOptionId ? prisma.furnitureDesignOption.findUnique({ where: { id: options.designOptionId } }) : null,
+    options.colourOptionId ? prisma.furnitureColourOption.findUnique({ where: { id: options.colourOptionId } }) : null,
+    options.sizeOptionId ? prisma.furnitureSizeOption.findUnique({ where: { id: options.sizeOptionId } }) : null,
+  ]);
+  if (options.designOptionId && (!design || design.skuId !== skuId)) {
+    throw badRequest("designOptionId does not belong to this SKU");
+  }
+  if (options.colourOptionId && (!colour || colour.skuId !== skuId)) {
+    throw badRequest("colourOptionId does not belong to this SKU");
+  }
+  if (options.sizeOptionId && (!size || size.skuId !== skuId)) {
+    throw badRequest("sizeOptionId does not belong to this SKU");
+  }
+}
 
 export async function createProductInstance(
   designId: string,
@@ -17,8 +45,13 @@ export async function createProductInstance(
     z?: number | null;
     rotationDeg?: number;
     quantity?: number;
+    designOptionId?: string | null;
+    colourOptionId?: string | null;
+    sizeOptionId?: string | null;
   },
 ) {
+  await assertOptionsBelongToSku(input.skuId, input);
+
   return prisma.productInstance.create({
     data: {
       designId,
@@ -29,14 +62,46 @@ export async function createProductInstance(
       z: input.z ?? null,
       rotationDeg: input.rotationDeg ?? 0,
       quantity: input.quantity ?? 1,
+      designOptionId: input.designOptionId ?? null,
+      colourOptionId: input.colourOptionId ?? null,
+      sizeOptionId: input.sizeOptionId ?? null,
     },
   });
 }
 
 export async function updateProductInstance(
   instanceId: string,
-  input: { x?: number; y?: number; z?: number; rotationDeg?: number; quantity?: number },
+  input: {
+    x?: number;
+    y?: number;
+    z?: number;
+    rotationDeg?: number;
+    quantity?: number;
+    designOptionId?: string | null;
+    colourOptionId?: string | null;
+    sizeOptionId?: string | null;
+  },
 ) {
+  const existing = await prisma.productInstance.findUnique({
+    where: { id: instanceId },
+    include: { sku: true },
+  });
+  if (!existing) throw notFound(`Product instance ${instanceId} not found`);
+
+  if (
+    input.rotationDeg !== undefined &&
+    input.rotationDeg !== existing.rotationDeg &&
+    !existing.sku.rotatable
+  ) {
+    throw badRequest("This product's catalogue configuration does not permit rotation");
+  }
+
+  const hasOptionChange =
+    input.designOptionId !== undefined || input.colourOptionId !== undefined || input.sizeOptionId !== undefined;
+  if (hasOptionChange) {
+    await assertOptionsBelongToSku(existing.skuId, input);
+  }
+
   return prisma.productInstance.update({
     where: { id: instanceId },
     data: input,

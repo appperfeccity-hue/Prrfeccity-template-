@@ -30,6 +30,8 @@ export function FurnitureCanvas({
   const shapeRefs = React.useRef<Map<string, Konva.Rect>>(new Map());
   const transformerRef = React.useRef<Konva.Transformer>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const selectedInstance = instances.find((i) => i.id === selectedId);
+  const rotateEnabled = selectedInstance?.sku?.rotatable ?? true;
 
   React.useEffect(() => {
     const transformer = transformerRef.current;
@@ -124,7 +126,7 @@ export function FurnitureCanvas({
               />
             </React.Fragment>
           ))}
-          <Transformer ref={transformerRef} rotateEnabled resizeEnabled={false} />
+          <Transformer ref={transformerRef} rotateEnabled={rotateEnabled} resizeEnabled={false} />
         </Layer>
       </Stage>
     </div>

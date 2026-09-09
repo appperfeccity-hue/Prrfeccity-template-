@@ -37,6 +37,12 @@ export function FurnitureLayer({
   const shapeRefs = useRef<Map<string, Konva.Rect>>(new Map());
   const transformerRef = useRef<Konva.Transformer>(null);
   const selectedId = selection?.kind === "instance" ? selection.id : null;
+  const selectedInstance = instances.find((i) => i.id === selectedId);
+  // Rotation is only offered when the selected instance's catalogue SKU
+  // permits it -- server-side enforced too (updateProductInstance rejects a
+  // rotationDeg change otherwise), this just keeps the handle from
+  // appearing for a configuration that isn't an approved rotate target.
+  const rotateEnabled = selectedInstance?.sku?.rotatable ?? true;
 
   useEffect(() => {
     const transformer = transformerRef.current;
@@ -106,7 +112,7 @@ export function FurnitureLayer({
           </Fragment>
         );
       })}
-      <Transformer ref={transformerRef} rotateEnabled resizeEnabled={false} />
+      <Transformer ref={transformerRef} rotateEnabled={rotateEnabled} resizeEnabled={false} />
     </Layer>
   );
 }

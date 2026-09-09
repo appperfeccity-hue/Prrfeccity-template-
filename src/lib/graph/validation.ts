@@ -27,7 +27,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     prisma.geometryEdgeRelationship.findMany({ where: { designId } }),
     prisma.productInstance.findMany({
       where: { designId },
-      include: { sku: { include: { category: true } } },
+      include: { sku: { include: { category: true, sizeOptions: true } } },
     }),
     prisma.geometryProductRelationship.findMany({
       where: { designId },
@@ -302,6 +302,25 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
         code: "FURNITURE_COORDINATES",
         severity: "ERROR",
         message: "Furniture instance is missing x/y coordinates",
+        refType: "ProductInstance",
+        refId: instance.id,
+      });
+    }
+  }
+
+  // 12b. FURNITURE_CONFIGURATION_COMPLETE -- "SKU + Design + Colour + Size ->
+  // fixed configuration" is only authoritative once a Size is actually
+  // selected. Only applies to a SKU that defines size options at all --
+  // furniture with no catalogue sizes (or a non-furniture SKU) has nothing to
+  // require here.
+  for (const instance of productInstances) {
+    if (instance.sku.category.key !== "FURNITURE") continue;
+    if (instance.sku.sizeOptions.length === 0) continue;
+    if (instance.sizeOptionId == null) {
+      issues.push({
+        code: "FURNITURE_CONFIGURATION_COMPLETE",
+        severity: "ERROR",
+        message: "Furniture instance has no Size selected from the catalogue",
         refType: "ProductInstance",
         refId: instance.id,
       });

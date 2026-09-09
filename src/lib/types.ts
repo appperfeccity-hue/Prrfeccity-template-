@@ -75,6 +75,12 @@ export const createProductInstanceSchema = z.object({
   z: z.number().optional(),
   rotationDeg: z.number().optional(),
   quantity: z.number().positive().optional(),
+  // Furniture Catalogue selection -- see FurnitureDesignOption/FurnitureColourOption/
+  // FurnitureSizeOption in prisma/schema.prisma. Optional because non-furniture SKUs,
+  // and furniture SKUs with no options in a given group, have nothing to select.
+  designOptionId: z.string().optional(),
+  colourOptionId: z.string().optional(),
+  sizeOptionId: z.string().optional(),
 });
 
 export const skuEdgeTypes = [
@@ -160,6 +166,9 @@ export const updateProductInstanceSchema = z.object({
   z: z.number().optional(),
   rotationDeg: z.number().optional(),
   quantity: z.number().positive().optional(),
+  designOptionId: z.string().optional(),
+  colourOptionId: z.string().optional(),
+  sizeOptionId: z.string().optional(),
 });
 
 export const updatePanelSchema = z.object({

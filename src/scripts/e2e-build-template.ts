@@ -36,6 +36,14 @@ async function skuId(code: string): Promise<string> {
   return sku.id;
 }
 
+async function furnitureSizeOptionId(code: string, key: string): Promise<string> {
+  const id = await skuId(code);
+  const { json } = await api("GET", `/api/skus/${id}`);
+  const option = json.sizeOptions.find((o: { key: string }) => o.key === key);
+  if (!option) throw new Error(`FurnitureSizeOption ${code}/${key} not found in seed data`);
+  return option.id;
+}
+
 async function skuEdgeId(fromCode: string, toCode: string): Promise<string> {
   const fromId = await skuId(fromCode);
   const toId = await skuId(toCode);
@@ -162,7 +170,11 @@ async function main() {
   const connectorInstance = await instance("SKU-CONNECTOR-H", { quantity: 2 });
   const trimInstance = await instance("SKU-TRIM-EDGE-01");
   const coveLightInstance = await instance("SKU-COVE-LIGHT-LED", { z: 1800 });
-  const furnitureInstance = await instance("SKU-FURN-VANITY-01", { x: 100, y: 100 });
+  const furnitureInstance = await instance("SKU-FURN-VANITY-01", {
+    x: 100,
+    y: 100,
+    sizeOptionId: await furnitureSizeOptionId("SKU-FURN-VANITY-01", "SMALL"),
+  });
   const zone2BackSheetInstance = await instance("SKU-PVC-BACK-01");
 
   // 5. Relationships + instance edges
@@ -419,6 +431,7 @@ async function main() {
     skuId: await skuId("SKU-FURN-VANITY-01"),
     x: 100,
     y: 100,
+    sizeOptionId: await furnitureSizeOptionId("SKU-FURN-VANITY-01", "SMALL"),
   });
 
   const { json: movedInstance } = await api(

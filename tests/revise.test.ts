@@ -175,6 +175,15 @@ describe("reviseTemplate", () => {
     const backSheetSku = await prisma.skuMaster.findUniqueOrThrow({ where: { code: "SKU-PVC-BACK-01" } });
     const connectorSku = await prisma.skuMaster.findUniqueOrThrow({ where: { code: "SKU-CONNECTOR-H" } });
     const furnitureSku = await prisma.skuMaster.findUniqueOrThrow({ where: { code: "SKU-FURN-VANITY-01" } });
+    const furnitureDesignOption = await prisma.furnitureDesignOption.findFirstOrThrow({
+      where: { skuId: furnitureSku.id, key: "MODERN" },
+    });
+    const furnitureColourOption = await prisma.furnitureColourOption.findFirstOrThrow({
+      where: { skuId: furnitureSku.id, key: "WALNUT" },
+    });
+    const furnitureSizeOption = await prisma.furnitureSizeOption.findFirstOrThrow({
+      where: { skuId: furnitureSku.id, key: "LARGE" },
+    });
 
     const partition0 = await createPartition(design.id, zone0.id, { orderIndex: 0, widthMm: 650, heightMm: 2400 });
     const fill = await autoFillPartition(design.id, partition0.id, panelSku.id);
@@ -192,7 +201,15 @@ describe("reviseTemplate", () => {
 
     const backSheetInstance = await createProductInstance(design.id, { skuId: backSheetSku.id, quantity: 1 });
     const connectorInstance = await createProductInstance(design.id, { skuId: connectorSku.id, quantity: 1 });
-    await createProductInstance(design.id, { skuId: furnitureSku.id, x: 150, y: 200, quantity: 1 });
+    await createProductInstance(design.id, {
+      skuId: furnitureSku.id,
+      x: 150,
+      y: 200,
+      quantity: 1,
+      designOptionId: furnitureDesignOption.id,
+      colourOptionId: furnitureColourOption.id,
+      sizeOptionId: furnitureSizeOption.id,
+    });
 
     await createGeometryProductRelationship(design.id, {
       geometryNodeId: fill.panels[0].panel.id,

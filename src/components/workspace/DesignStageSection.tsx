@@ -8,14 +8,17 @@ import { useCanvasStore } from "@/lib/canvas/store";
 import { useKeyboardShortcuts } from "@/lib/canvas/keyboard";
 import {
   buildInstanceMoveInput,
+  buildInstanceOptionsInput,
   buildInstanceQuantityInput,
   buildInstanceRotateInput,
   buildPanelResizeInput,
   buildPanelRotateInput,
+  type InstanceOptionIds,
 } from "@/lib/canvas/mutations";
 import { DesignStage, type DesignStageDropTarget } from "@/components/canvas/DesignStage";
 import { Inspector } from "@/components/inspector/Inspector";
 import { SkuPalette, type SkuDragPayload } from "@/components/palette/SkuPalette";
+import { FurnitureCatalogue, type ArmedFurniture } from "@/components/palette/FurnitureCatalogue";
 
 const DROP_RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOUNDARY_OF", "POSITIONED_AT", "ADJACENT_TO"];
 
@@ -49,8 +52,9 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
 
   const [pendingDrop, setPendingDrop] = useState<{ payload: SkuDragPayload; target: { kind: "panel" | "edge"; id: string } } | null>(null);
   const [dropRelationshipType, setDropRelationshipType] = useState(DROP_RELATIONSHIP_TYPES[0]);
-  const [selectedFurnitureSkuId, setSelectedFurnitureSkuId] = useState("");
+  const [armedFurniture, setArmedFurniture] = useState<ArmedFurniture | null>(null);
   const furnitureSkus = (skusQuery.data ?? []).filter((s) => s.category.key === "FURNITURE");
+  const nonFurnitureSkus = (skusQuery.data ?? []).filter((s) => s.category.key !== "FURNITURE");
 
   const resizePanelMutation = useMutation({
     mutationFn: (input: ReturnType<typeof buildPanelResizeInput>) => api.updatePanel(id, input.panelId, { widthMm: input.widthMm }),
@@ -152,10 +156,11 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   });
 
   const placeFurnitureMutation = useMutation({
-    mutationFn: ({ skuId, x, y }: { skuId: string; x: number; y: number }) =>
-      api.createProductInstance(id, { skuId, x, y }),
+    mutationFn: (variables: ArmedFurniture & { x: number; y: number }) =>
+      api.createProductInstance(id, variables),
     onSuccess: (result, variables) => {
       invalidate();
+      setArmedFurniture(null);
       let currentId = result.id;
       pushAction({
         description: `Place furniture`,
@@ -245,6 +250,25 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
     },
   });
 
+  const updateInstanceOptionsMutation = useMutation({
+    mutationFn: (input: ReturnType<typeof buildInstanceOptionsInput>) =>
+      api.updateProductInstance(id, input.instanceId, input.next),
+    onSuccess: (_result, input) => {
+      invalidate();
+      pushAction({
+        description: `Change furniture configuration`,
+        undo: async () => {
+          await api.updateProductInstance(id, input.instanceId, input.previous);
+          invalidate();
+        },
+        redo: async () => {
+          await api.updateProductInstance(id, input.instanceId, input.next);
+          invalidate();
+        },
+      });
+    },
+  });
+
   if (!design) return null;
 
   const findPanel = (panelId: string) => design.geometryNodes.find((n) => n.id === panelId)?.panel;
@@ -286,16 +310,26 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
     updateZMutation.mutate({ instanceId, z, previousZ: inst.z ?? 0 });
   };
 
+  const handleUpdateInstanceOptions = (instanceId: string, next: InstanceOptionIds) => {
+    const inst = findInstance(instanceId);
+    if (!inst) return;
+    const previous: InstanceOptionIds = {
+      designOptionId: inst.designOptionId ?? undefined,
+      colourOptionId: inst.colourOptionId ?? undefined,
+      sizeOptionId: inst.sizeOptionId ?? undefined,
+    };
+    updateInstanceOptionsMutation.mutate(buildInstanceOptionsInput(instanceId, next, previous));
+  };
+
   const handleDeleteZone = (zoneId: string) => api.deleteZone(id, zoneId).then(invalidate);
   const handleDeletePartition = (partitionId: string) => api.deleteGeometryNode(id, partitionId).then(invalidate);
   const handleDeletePanel = (panelId: string) => api.deleteGeometryNode(id, panelId).then(invalidate);
   const handleDeleteInstance = (instanceId: string) => api.deleteProductInstance(id, instanceId).then(invalidate);
 
-  const handleDropSku = (payload: SkuDragPayload, target: DesignStageDropTarget | null, mm: { x: number; y: number }) => {
-    if (payload.categoryKey === "FURNITURE") {
-      placeFurnitureMutation.mutate({ skuId: payload.skuId, x: mm.x, y: mm.y });
-      return;
-    }
+  const handleDropSku = (payload: SkuDragPayload, target: DesignStageDropTarget | null) => {
+    // Furniture is never draggable from the generic palette -- it only ever
+    // enters the canvas through the Furniture Catalogue's
+    // Product -> Design -> Colour -> Size -> Add to Canvas flow below.
     if (!target) return;
     if (target.kind === "partition") {
       if (payload.categoryKey !== "PRIMARY") {
@@ -310,19 +344,12 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="form-row">
-        <div className="field">
-          <label>Furniture SKU (click canvas to place, or drag from palette)</label>
-          <select value={selectedFurnitureSkuId} onChange={(e) => setSelectedFurnitureSkuId(e.target.value)}>
-            <option value="">Select…</option>
-            {furnitureSkus.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.code} — {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+      {armedFurniture && (
+        <p className="text-green-600 text-xs">
+          {furnitureSkus.find((s) => s.id === armedFurniture.skuId)?.code ?? "Furniture"} armed — click the canvas to
+          position it.
+        </p>
+      )}
       <div className="flex gap-4 items-start">
         <DesignStage
           design={design}
@@ -333,8 +360,8 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
           onResizePanel={handleResizePanel}
           onRotatePanel={handleRotatePanel}
           onPlaceFurniture={(xMm, yMm) => {
-            if (!selectedFurnitureSkuId) return;
-            placeFurnitureMutation.mutate({ skuId: selectedFurnitureSkuId, x: xMm, y: yMm });
+            if (!armedFurniture) return;
+            placeFurnitureMutation.mutate({ ...armedFurniture, x: xMm, y: yMm });
           }}
           onMoveFurniture={handleMoveFurniture}
           onRotateFurniture={handleRotateFurniture}
@@ -354,12 +381,14 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
               onRotateFurniture={handleRotateFurniture}
               onUpdateInstanceQuantity={handleUpdateQuantity}
               onUpdateInstanceZ={handleUpdateZ}
+              onUpdateInstanceOptions={handleUpdateInstanceOptions}
               onDeleteInstance={(instanceId) => handleDeleteInstance(instanceId)}
               onDeleteZone={(zoneId) => handleDeleteZone(zoneId)}
               onDeletePartition={(partitionId) => handleDeletePartition(partitionId)}
             />
           )}
-          <SkuPalette skus={skusQuery.data ?? []} />
+          <FurnitureCatalogue skus={furnitureSkus} armed={armedFurniture} onArm={setArmedFurniture} />
+          <SkuPalette skus={nonFurnitureSkus} />
         </div>
       </div>
 

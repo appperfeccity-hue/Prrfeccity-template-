@@ -164,6 +164,11 @@ export async function reviseTemplate(templateId: string) {
           z: instance.z,
           rotationDeg: instance.rotationDeg,
           quantity: instance.quantity,
+          // Catalogue option ids are SKU-scoped, not design-scoped -- they
+          // stay valid as-is across a revision, no remap needed.
+          designOptionId: instance.designOptionId,
+          colourOptionId: instance.colourOptionId,
+          sizeOptionId: instance.sizeOptionId,
         },
       });
       instanceIdMap.set(instance.id, created.id);

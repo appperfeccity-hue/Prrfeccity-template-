@@ -58,3 +58,18 @@ export function buildInstanceQuantityInput(
 ): InstanceQuantityInput {
   return { instanceId, quantity: Math.max(0.0001, requestedQuantity), previousQuantity };
 }
+
+// Catalogue-option change on an already-placed furniture instance (Design /
+// Colour / Size). This is NOT a geometric resize -- it swaps which approved
+// catalogue configuration the instance points at. Undefined fields are left
+// out of the mutate/undo payload entirely (not overwritten to null), so
+// changing only e.g. Size doesn't clobber an existing Design/Colour choice.
+export type InstanceOptionIds = { designOptionId?: string; colourOptionId?: string; sizeOptionId?: string };
+export type InstanceOptionsInput = { instanceId: string; next: InstanceOptionIds; previous: InstanceOptionIds };
+export function buildInstanceOptionsInput(
+  instanceId: string,
+  next: InstanceOptionIds,
+  previous: InstanceOptionIds,
+): InstanceOptionsInput {
+  return { instanceId, next, previous };
+}

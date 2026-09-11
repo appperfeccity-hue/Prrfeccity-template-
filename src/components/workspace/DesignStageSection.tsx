@@ -23,13 +23,13 @@ import { FurnitureCatalogue, type ArmedFurniture } from "@/components/palette/Fu
 const DROP_RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOUNDARY_OF", "POSITIONED_AT", "ADJACENT_TO"];
 
 /**
- * UI-M4/M5: the unified DesignStage + generalized Inspector, mounted
- * alongside (not replacing) the existing Wall/Zones & Panels/Furniture
- * sections' own canvases, per the explicit instruction to verify the new
- * canvas against the old rendering before the M6 cutover. Owns the same
- * mutation set as ZonesSection/FurnitureSection -- intentional, temporary
- * duplication for the parallel-verification window; once the old canvases
- * are removed at M6, one of the two copies goes with them.
+ * UI-M6b: the unified DesignStage + generalized Inspector is now the sole
+ * authoring surface for panel resize/rotate, auto-fill, drag-a-SKU-onto-a-
+ * geometry-target linking, and furniture placement/move/rotate/options --
+ * the old ZonesSection/FurnitureSection that used to duplicate this were
+ * removed once parity was verified (see WallFormPanel/CreatePanel/
+ * ProductLinking for the wall/creation/freestanding-placement pieces that
+ * live alongside this component).
  *
  * Every resize/rotate/move/quantity mutation is built from the shared pure
  * functions in src/lib/canvas/mutations.ts and called from exactly one

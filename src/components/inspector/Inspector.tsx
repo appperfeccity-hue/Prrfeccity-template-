@@ -67,7 +67,7 @@ export function Inspector({
         <Field label="Type" value={node.wall.wallType} />
         <Field label="Length" value={`${node.wall.lengthMm}mm`} />
         <Field label="Height" value={`${node.wall.heightMm}mm`} />
-        <p className="text-xs text-foreground/50 mt-2">Edit from the Wall section below.</p>
+        <p className="text-xs text-foreground/50 mt-2">Edit from the Wall panel above.</p>
       </InspectorShell>
     );
   }

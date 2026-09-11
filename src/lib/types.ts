@@ -7,6 +7,20 @@ export const createDesignSchema = z.object({
   tags: z.array(z.string()).optional(),
 });
 
+export const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+export const roleValues = ["ADMIN", "DESIGNER", "CONSULTANT", "SYSTEM"] as const;
+
+export const createUserSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  name: z.string().min(1),
+  role: z.enum(roleValues),
+});
+
 export const setWallSchema = z
   .object({
     wallType: z.enum(["STRAIGHT_LTR", "STRAIGHT_RTL", "L_TYPE"]),

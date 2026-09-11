@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { QueryProvider } from "@/lib/query-provider";
 import { ToastProvider } from "@/lib/toast";
+import { NavUser } from "@/components/layout/NavUser";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -34,6 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                 <Link href="/">Designs</Link>
                 <Link href="/library">Design Library</Link>
               </nav>
+              <NavUser />
             </header>
             <main className="app-main">{children}</main>
           </ToastProvider>

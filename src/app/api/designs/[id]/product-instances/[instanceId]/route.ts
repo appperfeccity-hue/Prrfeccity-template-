@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse } from "@/lib/api/errors";
 import { requireDraftDesign } from "@/lib/api/guards";
+import { requireRole } from "@/lib/api/auth";
 import { deleteProductInstance, updateProductInstance } from "@/lib/graph/product";
 import { updateProductInstanceSchema } from "@/lib/types";
 
@@ -9,6 +10,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; instanceId: string }> },
 ) {
   try {
+    await requireRole(req, ["ADMIN", "DESIGNER"]);
     const { id, instanceId } = await params;
     await requireDraftDesign(id);
     const body = updateProductInstanceSchema.parse(await req.json());
@@ -20,10 +22,11 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string; instanceId: string }> },
 ) {
   try {
+    await requireRole(req, ["ADMIN", "DESIGNER"]);
     const { id, instanceId } = await params;
     await requireDraftDesign(id);
     await deleteProductInstance(instanceId);

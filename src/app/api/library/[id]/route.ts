@@ -1,12 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { errorResponse, notFound } from "@/lib/api/errors";
+import { requireUser } from "@/lib/api/auth";
 
 export async function GET(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await requireUser(req);
     const { id } = await params;
     const design = await prisma.design.findFirst({
       where: { id, status: "PUBLISHED" },

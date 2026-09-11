@@ -24,6 +24,9 @@ import type {
 } from "@/generated/prisma/models";
 import type { ValidationIssue } from "@/lib/types";
 import type { BomLineInput } from "@/lib/graph/bom";
+import type { Role } from "@/generated/prisma/client";
+
+export type SafeUser = { id: string; email: string; name: string; role: Role; createdAt: string };
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -286,4 +289,8 @@ export const api = {
 
   listLibrary: () => request<(Design & { look: Look | null })[]>("GET", "/library"),
   getLibraryEntry: (id: string) => request<FullDesign>("GET", `/library/${id}`),
+
+  login: (email: string, password: string) => request<SafeUser>("POST", "/auth/login", { email, password }),
+  logout: () => request<void>("POST", "/auth/logout", {}),
+  getMe: () => request<SafeUser>("GET", "/auth/me"),
 };

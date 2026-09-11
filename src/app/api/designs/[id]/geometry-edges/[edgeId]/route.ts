@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { errorResponse } from "@/lib/api/errors";
 import { requireDraftDesign } from "@/lib/api/guards";
+import { requireRole } from "@/lib/api/auth";
 import { updateEdgeFlagsSchema } from "@/lib/types";
 
 export async function PUT(
@@ -9,6 +10,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; edgeId: string }> },
 ) {
   try {
+    await requireRole(req, ["ADMIN", "DESIGNER"]);
     const { id, edgeId } = await params;
     await requireDraftDesign(id);
     const body = updateEdgeFlagsSchema.parse(await req.json());

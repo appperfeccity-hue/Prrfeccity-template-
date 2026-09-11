@@ -1,14 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { errorResponse, notFound } from "@/lib/api/errors";
 import { requireDraftDesign } from "@/lib/api/guards";
+import { requireRole, requireUser } from "@/lib/api/auth";
 import { generateMasterBom } from "@/lib/graph/bom";
 
 export async function GET(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await requireUser(req);
     const { id } = await params;
     const bom = await prisma.masterBom.findFirst({
       where: { templateId: id },
@@ -23,10 +25,11 @@ export async function GET(
 }
 
 export async function POST(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await requireRole(req, ["ADMIN", "DESIGNER"]);
     const { id } = await params;
     await requireDraftDesign(id);
     const bom = await generateMasterBom(id);

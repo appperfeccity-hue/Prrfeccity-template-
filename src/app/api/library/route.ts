@@ -1,24 +1,31 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { errorResponse } from "@/lib/api/errors";
+import { requireUser } from "@/lib/api/auth";
 
-export async function GET() {
-  const published = await prisma.design.findMany({
-    where: { status: "PUBLISHED" },
-    orderBy: { version: "desc" },
-    include: { look: true },
-  });
+export async function GET(req: NextRequest) {
+  try {
+    await requireUser(req);
+    const published = await prisma.design.findMany({
+      where: { status: "PUBLISHED" },
+      orderBy: { version: "desc" },
+      include: { look: true },
+    });
 
-  const latestByLineage = new Map<string, (typeof published)[number]>();
-  for (const design of published) {
-    const lineageKey = design.rootTemplateId ?? design.id;
-    if (!latestByLineage.has(lineageKey)) {
-      latestByLineage.set(lineageKey, design);
+    const latestByLineage = new Map<string, (typeof published)[number]>();
+    for (const design of published) {
+      const lineageKey = design.rootTemplateId ?? design.id;
+      if (!latestByLineage.has(lineageKey)) {
+        latestByLineage.set(lineageKey, design);
+      }
     }
-  }
 
-  return NextResponse.json(
-    [...latestByLineage.values()].sort(
-      (a, b) => (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0),
-    ),
-  );
+    return NextResponse.json(
+      [...latestByLineage.values()].sort(
+        (a, b) => (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0),
+      ),
+    );
+  } catch (err) {
+    return errorResponse(err);
+  }
 }

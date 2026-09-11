@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse } from "@/lib/api/errors";
 import { requireDraftDesign } from "@/lib/api/guards";
+import { requireRole } from "@/lib/api/auth";
 import { createWall } from "@/lib/graph/geometry";
 import { setWallSchema } from "@/lib/types";
 
@@ -9,6 +10,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await requireRole(req, ["ADMIN", "DESIGNER"]);
     const { id } = await params;
     await requireDraftDesign(id);
     const body = setWallSchema.parse(await req.json());

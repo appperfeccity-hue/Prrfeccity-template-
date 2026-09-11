@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse } from "@/lib/api/errors";
 import { requireDraftDesign } from "@/lib/api/guards";
+import { requireRole } from "@/lib/api/auth";
 import { createPanel } from "@/lib/graph/geometry";
 import { createPanelSchema } from "@/lib/types";
 
@@ -9,6 +10,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string; partitionId: string }> },
 ) {
   try {
+    await requireRole(req, ["ADMIN", "DESIGNER"]);
     const { id, partitionId } = await params;
     await requireDraftDesign(id);
     const body = createPanelSchema.parse(await req.json());

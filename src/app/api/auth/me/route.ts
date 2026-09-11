@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { errorResponse } from "@/lib/api/errors";
 import { requireUser } from "@/lib/api/auth";
 
 export async function GET(req: NextRequest) {
   try {
-    await requireUser(req);
-    const looks = await prisma.look.findMany({ orderBy: { label: "asc" } });
-    return NextResponse.json(looks);
+    const user = await requireUser(req);
+    return NextResponse.json({ id: user.id, email: user.email, name: user.name, role: user.role });
   } catch (err) {
     return errorResponse(err);
   }

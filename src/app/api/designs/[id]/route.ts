@@ -3,13 +3,15 @@ import { prisma } from "@/lib/prisma";
 import { errorResponse } from "@/lib/api/errors";
 import { notFound } from "@/lib/api/errors";
 import { requireDesign } from "@/lib/api/guards";
+import { requireRole, requireUser } from "@/lib/api/auth";
 import { updateDesignSchema } from "@/lib/types";
 
 export async function GET(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await requireUser(req);
     const { id } = await params;
     const design = await prisma.design.findUnique({
       where: { id },
@@ -48,6 +50,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await requireRole(req, ["ADMIN", "DESIGNER"]);
     const { id } = await params;
     await requireDesign(id);
     const body = updateDesignSchema.parse(await req.json());

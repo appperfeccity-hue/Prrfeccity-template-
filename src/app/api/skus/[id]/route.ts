@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { errorResponse, notFound } from "@/lib/api/errors";
+import { requireRole, requireUser } from "@/lib/api/auth";
 import { updateSkuMaster } from "@/lib/graph/sku";
 import { updateSkuMasterSchema } from "@/lib/types";
 
 export async function GET(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await requireUser(req);
     const { id } = await params;
     const sku = await prisma.skuMaster.findUnique({
       where: { id },
@@ -37,6 +39,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    await requireRole(req, ["ADMIN"]);
     const { id } = await params;
     const body = updateSkuMasterSchema.parse(await req.json());
     const sku = await updateSkuMaster(id, body);

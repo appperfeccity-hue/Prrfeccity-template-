@@ -22,6 +22,14 @@ export function badRequest(message: string) {
   return new ApiError(400, message);
 }
 
+export function unauthorized(message: string) {
+  return new ApiError(401, message);
+}
+
+export function forbidden(message: string) {
+  return new ApiError(403, message);
+}
+
 export function errorResponse(err: unknown) {
   if (err instanceof ApiError) {
     return NextResponse.json({ error: err.message }, { status: err.status });

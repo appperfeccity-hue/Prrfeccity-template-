@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse } from "@/lib/api/errors";
 import { requireDraftDesign } from "@/lib/api/guards";
+import { requireRole } from "@/lib/api/auth";
 import { updatePanel } from "@/lib/graph/geometry";
 import { updatePanelSchema } from "@/lib/types";
 
@@ -9,6 +10,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; panelId: string }> },
 ) {
   try {
+    await requireRole(req, ["ADMIN", "DESIGNER"]);
     const { id, panelId } = await params;
     await requireDraftDesign(id);
     const body = updatePanelSchema.parse(await req.json());

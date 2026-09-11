@@ -18,15 +18,32 @@ function assert(condition: boolean, message: string) {
   console.log(`  ok: ${message}`);
 }
 
-async function api(method: string, path: string, body?: unknown) {
+// Every route now requires a session cookie (RBAC) -- `api()` tracks the
+// "current" session automatically (set by the most recent unoverridden
+// login) so every pre-existing call site below keeps working unchanged
+// once step 0 logs in. Pass `cookieOverride` to act as a *different*
+// already-logged-in user without disturbing the default session -- used by
+// the RBAC verification section to act as a throwaway Designer.
+let sessionCookie: string | undefined;
+
+async function api(method: string, path: string, body?: unknown, cookieOverride?: string) {
+  const headers: Record<string, string> = {};
+  if (body) headers["Content-Type"] = "application/json";
+  const cookie = cookieOverride ?? sessionCookie;
+  if (cookie) headers["Cookie"] = cookie;
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
+  const setCookie = res.headers.get("set-cookie");
+  const newCookie = setCookie ? setCookie.split(";")[0] : undefined;
+  if (newCookie && cookieOverride === undefined) {
+    sessionCookie = newCookie;
+  }
   const text = await res.text();
   const json = text ? JSON.parse(text) : null;
-  return { status: res.status, json };
+  return { status: res.status, json, cookie: newCookie };
 }
 
 async function skuId(code: string): Promise<string> {
@@ -55,6 +72,19 @@ async function skuEdgeId(fromCode: string, toCode: string): Promise<string> {
 
 async function main() {
   console.log(`Running e2e build-template script against ${BASE_URL}\n`);
+
+  // 0. Auth: every route requires a session now -- log in as the seeded
+  // bootstrap Admin (prisma/seed.ts) before anything else. The resulting
+  // cookie becomes the default session `api()` sends on every subsequent
+  // call for the rest of the script.
+  console.log("0. Auth: log in as the seeded bootstrap Admin");
+  const { status: bootstrapLoginStatus, json: bootstrapLoginUser } = await api("POST", "/api/auth/login", {
+    email: "admin@example.com",
+    password: "changeme123",
+  });
+  assert(bootstrapLoginStatus === 200, "bootstrap Admin login succeeds");
+  assert(bootstrapLoginUser.role === "ADMIN", "logged-in user's role is ADMIN");
+  assert(Boolean(sessionCookie), "login sets a session cookie, used as the default session from here on");
 
   // 1. Design + wall
   console.log("1. Create design, set wall (STRAIGHT_LTR, 3000x2400mm)");
@@ -651,6 +681,56 @@ async function main() {
 
   const trimBomLine = bom.lines.find((l: { sourceGeometryProductRelationshipId: string | null }) => l.sourceGeometryProductRelationshipId === relTrim.json.id);
   assert(Boolean(trimBomLine.skuVersionId), "the BOM line generated in step 7 was pinned to a skuVersionId");
+
+  // 17. RBAC: a representative sample proving the mechanism end-to-end over
+  // real HTTP with real cookies -- requireUser/requireRole themselves are
+  // covered exhaustively by tests/auth.test.ts; this just proves the wiring
+  // actually works when hit as a real client, not just in unit isolation.
+  console.log("\n17. RBAC: role enforcement over real HTTP with real cookies");
+
+  const { status: unauthStatus } = await api("GET", "/api/designs", undefined, "");
+  assert(unauthStatus === 401, "a request with no session cookie is rejected 401 from a protected route");
+
+  const trimSkuIdForRbac = await skuId("SKU-TRIM-EDGE-01");
+  const { json: trimDetailForRbac } = await api("GET", `/api/skus/${trimSkuIdForRbac}`);
+  const { status: adminPatchStatus } = await api("PATCH", `/api/skus/${trimSkuIdForRbac}`, {
+    name: trimDetailForRbac.name,
+  });
+  assert(adminPatchStatus === 200, "ADMIN (the default logged-in session) succeeds on an ADMIN-only route (PATCH /api/skus/:id)");
+
+  const designerEmail = `e2e-throwaway-designer-${Date.now()}@example.com`;
+  const { status: createDesignerStatus } = await api("POST", "/api/users", {
+    email: designerEmail,
+    password: "e2e-throwaway-designer-pw",
+    name: "E2E Throwaway Designer",
+    role: "DESIGNER",
+  });
+  assert(createDesignerStatus === 201, "ADMIN can create a new Designer user via POST /api/users");
+
+  const { status: designerLoginStatus, cookie: designerCookie } = await api(
+    "POST",
+    "/api/auth/login",
+    { email: designerEmail, password: "e2e-throwaway-designer-pw" },
+    "",
+  );
+  assert(designerLoginStatus === 200, "the throwaway Designer can log in");
+  assert(Boolean(designerCookie), "Designer login sets its own session cookie, independent of the Admin session");
+
+  const { status: designerPatchStatus } = await api(
+    "PATCH",
+    `/api/skus/${trimSkuIdForRbac}`,
+    { name: trimDetailForRbac.name },
+    designerCookie,
+  );
+  assert(designerPatchStatus === 403, "DESIGNER is rejected 403 from the same ADMIN-only route");
+
+  const { status: designerCreateDesignStatus } = await api(
+    "POST",
+    "/api/designs",
+    { name: "E2E RBAC Designer-created Design" },
+    designerCookie,
+  );
+  assert(designerCreateDesignStatus === 201, "DESIGNER succeeds on an ADMIN+DESIGNER route (POST /api/designs)");
 
   console.log(`\nAll ${assertions} assertions passed.`);
 }

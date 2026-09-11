@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
+import { hashPassword } from "../src/lib/graph/auth";
 import type { SkuEdgeType } from "../src/generated/prisma/client";
 
 const categories: { key: string; label: string }[] = [
@@ -216,9 +217,29 @@ async function main() {
     { designs: 0, colours: 0, sizes: 0 },
   );
 
+  // Bootstrap Admin: creating a User is ADMIN-only (POST /api/users), so the
+  // very first Admin has to come from somewhere other than the API -- this
+  // is that somewhere, matching how every other piece of baseline data in
+  // this app already gets seeded rather than created through a UI.
+  // DEV-ONLY DEFAULT PASSWORD -- change or remove this account before any
+  // real deployment.
+  const bootstrapAdminEmail = "admin@example.com";
+  const existingAdmin = await prisma.user.findUnique({ where: { email: bootstrapAdminEmail } });
+  if (!existingAdmin) {
+    await prisma.user.create({
+      data: {
+        email: bootstrapAdminEmail,
+        passwordHash: await hashPassword("changeme123"),
+        name: "Bootstrap Admin",
+        role: "ADMIN",
+      },
+    });
+  }
+
   console.log(
     `Seeded ${categories.length} categories, ${skus.length} SKUs, ${skuEdges.length} SKU edges, ${looks.length} looks, ` +
-      `${optionCounts.designs} design options, ${optionCounts.colours} colour options, ${optionCounts.sizes} size options.`,
+      `${optionCounts.designs} design options, ${optionCounts.colours} colour options, ${optionCounts.sizes} size options, ` +
+      `bootstrap admin (${bootstrapAdminEmail}).`,
   );
 }
 

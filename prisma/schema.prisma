@@ -11,6 +11,48 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
+// Auth / RBAC
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  DESIGNER
+  CONSULTANT
+  // Extension point -- not wired to any route yet. No background job/cron/
+  // service-to-service caller exists in this app today; this exists so the
+  // enum doesn't need a breaking change when one does.
+  SYSTEM
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  sessions Session[]
+}
+
+// DB-backed opaque session, not a JWT -- matches this app's "Postgres is the
+// system of record" philosophy and gives instant revocation (delete the row)
+// with no signing-secret rotation story.
+model Session {
+  id        String   @id @default(cuid())
+  // Random 256-bit token, distinct from id -- id is a cuid (optimized for
+  // uniqueness, not brute-force resistance); token is generated via
+  // node:crypto specifically for its unpredictability as a bearer credential.
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
 // Template / Design Library
 // ---------------------------------------------------------------------------
 

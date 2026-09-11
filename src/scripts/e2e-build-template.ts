@@ -638,6 +638,20 @@ async function main() {
   );
   assert(!manualEdge, "no other ProductInstanceEdge was silently created alongside the accepted one");
 
+  // 16. SKU Master versioning: prove the live wiring end-to-end over the real
+  // HTTP routes, without mutating shared seed catalog data (the mutation
+  // path -- version bump on edit, cosmetic no-bump, discontinue blocking --
+  // is already covered thoroughly by tests/sku-versioning.test.ts against
+  // isolated throwaway SkuMaster rows).
+  console.log("\n16. SKU Master versioning: currentVersion/discontinuedAt live end-to-end, BOM lines pin skuVersionId");
+  const trimSkuId = await skuId("SKU-TRIM-EDGE-01");
+  const { json: trimSkuDetail } = await api("GET", `/api/skus/${trimSkuId}`);
+  assert(trimSkuDetail.currentVersion === 1, "GET /api/skus/:id returns currentVersion");
+  assert(trimSkuDetail.discontinuedAt === null, "a never-discontinued SKU has discontinuedAt: null");
+
+  const trimBomLine = bom.lines.find((l: { sourceGeometryProductRelationshipId: string | null }) => l.sourceGeometryProductRelationshipId === relTrim.json.id);
+  assert(Boolean(trimBomLine.skuVersionId), "the BOM line generated in step 7 was pinned to a skuVersionId");
+
   console.log(`\nAll ${assertions} assertions passed.`);
 }
 

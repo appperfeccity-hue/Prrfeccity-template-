@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { badRequest, notFound } from "@/lib/api/errors";
 import { WIDTH_TOLERANCE_MM } from "@/lib/graph/constants";
+import { assertSkuNotDiscontinued } from "@/lib/graph/sku";
 import type {
   GeometryEdgeRelationshipType,
   GeometryNodeType,
@@ -257,6 +258,7 @@ export async function autoFillPartition(designId: string, partitionId: string, s
     throw badRequest("Auto-fill only applies to an empty partition");
   }
   if (!sku) throw notFound(`SKU ${skuId} not found`);
+  assertSkuNotDiscontinued(sku);
   if (sku.category.key !== "PRIMARY") {
     throw badRequest("Auto-fill requires a PRIMARY-category panel SKU");
   }

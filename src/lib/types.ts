@@ -176,6 +176,20 @@ export const updatePanelSchema = z.object({
   orientation: z.enum(["VERTICAL", "HORIZONTAL"]).optional(),
 });
 
+// code/name are cosmetic (never bump SkuMaster.currentVersion); every other
+// field here is physical/rule-affecting and bumps it -- see
+// src/lib/graph/sku.ts's VERSION_BUMPING_FIELDS.
+export const updateSkuMasterSchema = z.object({
+  code: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  categoryId: z.string().optional(),
+  defaultWidthMm: z.number().positive().nullable().optional(),
+  defaultUnit: z.string().min(1).optional(),
+  minCutPieceMm: z.number().positive().nullable().optional(),
+  attributes: z.unknown().nullable().optional(),
+  rotatable: z.boolean().optional(),
+});
+
 // Design Library presentation metadata -- not part of the design graph, so
 // editable even on a PUBLISHED design (see requireDesign vs requireDraftDesign).
 export const updateDesignSchema = z.object({

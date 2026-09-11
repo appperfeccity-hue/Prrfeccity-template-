@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { badRequest, notFound } from "@/lib/api/errors";
+import { assertSkuNotDiscontinued } from "@/lib/graph/sku";
 import type {
   GeometryProductRelationshipType,
   Prisma,
@@ -50,6 +51,9 @@ export async function createProductInstance(
     sizeOptionId?: string | null;
   },
 ) {
+  const sku = await prisma.skuMaster.findUnique({ where: { id: input.skuId } });
+  if (!sku) throw notFound(`SKU ${input.skuId} not found`);
+  assertSkuNotDiscontinued(sku);
   await assertOptionsBelongToSku(input.skuId, input);
 
   return prisma.productInstance.create({

@@ -36,6 +36,7 @@ export type BomLineInput = {
   skuId: string;
   quantity: number;
   unitOfMeasure: string;
+  skuVersionId?: string;
   sourceGeometryProductRelationshipId?: string;
   sourceProductInstanceEdgeId?: string;
   sourceProductInstanceId?: string;
@@ -75,17 +76,34 @@ export async function computeMasterBomLines(designId: string): Promise<BomLineIn
   for (const rel of geometryProductRelationships) coveredInstanceIds.add(rel.productInstanceId);
   for (const edge of productInstanceEdges) coveredInstanceIds.add(edge.fromInstanceId);
 
+  // Pin every line to whichever SkuMasterVersion is current *right now* --
+  // this is the moment a design's BOM gets frozen (generateMasterBom persists
+  // it, and publish then locks the whole design). If the SKU is edited again
+  // after this, already-generated lines keep resolving to this exact
+  // snapshot, not the newer one.
+  const skusUsed = new Map<string, number>();
+  for (const rel of geometryProductRelationships) skusUsed.set(rel.productInstance.skuId, rel.productInstance.sku.currentVersion);
+  for (const edge of productInstanceEdges) skusUsed.set(edge.fromInstance.skuId, edge.fromInstance.sku.currentVersion);
+  for (const instance of productInstances) skusUsed.set(instance.skuId, instance.sku.currentVersion);
+
+  const versionRows = await prisma.skuMasterVersion.findMany({
+    where: { OR: Array.from(skusUsed, ([skuId, version]) => ({ skuId, version })) },
+  });
+  const versionIdBySkuId = new Map(versionRows.map((v) => [v.skuId, v.id]));
+
   return [
     ...geometryProductRelationships.map((rel) => ({
       skuId: rel.productInstance.skuId,
       quantity: resolveQuantity(rel),
       unitOfMeasure: rel.productInstance.sku.defaultUnit,
+      skuVersionId: versionIdBySkuId.get(rel.productInstance.skuId),
       sourceGeometryProductRelationshipId: rel.id,
     })),
     ...productInstanceEdges.map((edge) => ({
       skuId: edge.fromInstance.skuId,
       quantity: edge.fromInstance.quantity,
       unitOfMeasure: edge.fromInstance.sku.defaultUnit,
+      skuVersionId: versionIdBySkuId.get(edge.fromInstance.skuId),
       sourceProductInstanceEdgeId: edge.id,
     })),
     ...productInstances
@@ -94,6 +112,7 @@ export async function computeMasterBomLines(designId: string): Promise<BomLineIn
         skuId: instance.skuId,
         quantity: instance.quantity,
         unitOfMeasure: instance.sku.defaultUnit,
+        skuVersionId: versionIdBySkuId.get(instance.skuId),
         sourceProductInstanceId: instance.id,
       })),
   ];

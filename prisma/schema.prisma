@@ -255,14 +255,22 @@ model Category {
   key   String @unique
   label String
 
-  skus SkuMaster[]
+  skus        SkuMaster[]
+  skuVersions SkuMasterVersion[]
 }
 
-// Extension point: catalog/version history is intentionally not modeled yet
-// (no version field, no snapshot-at-publish-time reference from MasterBomLine
-// back to a specific SkuMaster revision). Deferred alongside Consultant
-// Project State / Physical Engine / Resolver until a concrete need names the
-// actual versioning scheme required.
+// Catalog/version history: SkuMaster is the live-editable catalog row;
+// SkuMasterVersion (below) is an immutable snapshot taken whenever a
+// physical/rule-affecting field changes (see PATCH /api/skus/[id]).
+// currentVersion always points at the latest snapshot. MasterBomLine pins
+// skuVersionId at BOM-generation time -- once a Template is published, its
+// BOM's version pins never move even if the live SkuMaster keeps changing.
+// Cosmetic fields (code, name) do NOT bump the version, matching "price
+// changes don't republish" even though this schema has no per-SKU price
+// field to exempt literally. Furniture option sub-tables
+// (FurnitureDesignOption/ColourOption/SizeOption) are NOT versioned by this
+// mechanism -- a deliberate scope line, not an oversight; see Phase 5 of
+// the plan file for the full reconciliation this implements.
 model SkuMaster {
   id             String   @id @default(cuid())
   code           String   @unique
@@ -278,6 +286,12 @@ model SkuMaster {
   // hidden in the UI -- a catalogue-driven furniture piece (e.g. a
   // wall-fixed unit) may simply not be an approved rotate target.
   rotatable      Boolean  @default(true)
+  currentVersion Int      @default(1)
+  // Set via POST /api/skus/[id]/discontinue. A discontinued SKU cannot be
+  // placed as a NEW ProductInstance (see createProductInstance/
+  // autoFillPartition), but every instance/BOM line that already references
+  // it -- and its already-frozen SkuMasterVersion snapshots -- stay valid.
+  discontinuedAt DateTime?
 
   edgesFrom        SkuEdge[]               @relation("SkuEdgeFrom")
   edgesTo          SkuEdge[]               @relation("SkuEdgeTo")
@@ -285,8 +299,35 @@ model SkuMaster {
   designOptions    FurnitureDesignOption[]
   colourOptions    FurnitureColourOption[]
   sizeOptions      FurnitureSizeOption[]
+  versions         SkuMasterVersion[]
 
   @@index([categoryId])
+}
+
+// An immutable snapshot of SkuMaster's physical/rule-affecting fields at one
+// point in time. Created on every version bump (see PATCH /api/skus/[id]);
+// never updated or deleted once created -- MasterBomLine rows referencing an
+// old version must keep resolving correctly forever, even after the live
+// SkuMaster has moved on to a newer version.
+model SkuMasterVersion {
+  id             String   @id @default(cuid())
+  skuId          String
+  sku            SkuMaster @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  version        Int
+  code           String
+  name           String
+  categoryId     String
+  category       Category  @relation(fields: [categoryId], references: [id])
+  defaultWidthMm Float?
+  defaultUnit    String
+  minCutPieceMm  Float?
+  attributes     Json?
+  rotatable      Boolean
+  createdAt      DateTime  @default(now())
+
+  masterBomLines MasterBomLine[]
+
+  @@unique([skuId, version])
 }
 
 // The Furniture Catalogue's selectable option groups. SKU-scoped (not a
@@ -535,6 +576,12 @@ model MasterBomLine {
   skuId         String
   quantity      Float
   unitOfMeasure String
+  // Pinned to the SKU's currentVersion at the moment this line was
+  // generated (see generateMasterBom in src/lib/graph/bom.ts). Nullable
+  // only because lines generated before this field existed have none --
+  // every line generated from now on gets one.
+  skuVersionId  String?
+  skuVersion    SkuMasterVersion? @relation(fields: [skuVersionId], references: [id])
 
   sourceGeometryProductRelationshipId String?
   sourceGeometryProductRelationship   GeometryProductRelationship? @relation("BomLineFromRelationship", fields: [sourceGeometryProductRelationshipId], references: [id], onDelete: Cascade)

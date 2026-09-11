@@ -128,6 +128,35 @@ async function main() {
       },
     });
     skuIdByCode.set(sku.code, row.id);
+
+    // Backfill the version-1 snapshot every SkuMaster needs a valid
+    // currentVersion to point at -- mirrors row.currentVersion (always 1 for
+    // seed data; PATCH /api/skus/[id] is the only thing that ever bumps it).
+    await prisma.skuMasterVersion.upsert({
+      where: { skuId_version: { skuId: row.id, version: row.currentVersion } },
+      update: {
+        code: row.code,
+        name: row.name,
+        categoryId: row.categoryId,
+        defaultWidthMm: row.defaultWidthMm,
+        defaultUnit: row.defaultUnit,
+        minCutPieceMm: row.minCutPieceMm,
+        attributes: row.attributes ?? undefined,
+        rotatable: row.rotatable,
+      },
+      create: {
+        skuId: row.id,
+        version: row.currentVersion,
+        code: row.code,
+        name: row.name,
+        categoryId: row.categoryId,
+        defaultWidthMm: row.defaultWidthMm,
+        defaultUnit: row.defaultUnit,
+        minCutPieceMm: row.minCutPieceMm,
+        attributes: row.attributes ?? undefined,
+        rotatable: row.rotatable,
+      },
+    });
   }
 
   for (const entry of furnitureOptions) {

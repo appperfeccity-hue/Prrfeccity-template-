@@ -173,6 +173,22 @@ export const api = {
       }
     >("GET", `/skus/${skuId}`),
 
+  updateSku: (
+    skuId: string,
+    data: {
+      code?: string;
+      name?: string;
+      categoryId?: string;
+      defaultWidthMm?: number | null;
+      defaultUnit?: string;
+      minCutPieceMm?: number | null;
+      attributes?: unknown;
+      rotatable?: boolean;
+    },
+  ) => request<SkuMaster>("PATCH", `/skus/${skuId}`, data),
+
+  discontinueSku: (skuId: string) => request<SkuMaster>("POST", `/skus/${skuId}/discontinue`),
+
   createProductInstance: (
     id: string,
     data: {

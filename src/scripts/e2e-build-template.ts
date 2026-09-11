@@ -732,6 +732,259 @@ async function main() {
   );
   assert(designerCreateDesignStatus === 201, "DESIGNER succeeds on an ADMIN+DESIGNER route (POST /api/designs)");
 
+  // 18. Consultant Project State / BOM Resolver: a small, dedicated Template
+  // (TemplateParameter CRUD is DRAFT-only, so the params below must be wired
+  // before publish) -- create a Project from it, exercise bounded edits (a
+  // rejection each for out-of-bounds and "not exposed"), swap an
+  // EDGE_TREATMENT, generate a Final BOM, and prove the source Template's
+  // Master BOM is structurally untouched.
+  console.log("\n18. Consultant Project State / BOM Resolver: create a Project, exercise bounded edits, generate a Final BOM, and verify the Template's Master BOM is untouched");
+
+  const { json: projDesign } = await api("POST", "/api/designs", { name: "E2E Project Template" });
+  const projDesignId: string = projDesign.id;
+
+  const { json: projWall } = await api("PUT", `/api/designs/${projDesignId}/wall`, {
+    wallType: "STRAIGHT_LTR",
+    lengthMm: 1200,
+    heightMm: 2400,
+  });
+  const { json: projZone } = await api("POST", `/api/designs/${projDesignId}/zones`, {
+    wallId: projWall.wall.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 1200,
+    heightMm: 2400,
+  });
+  const { json: projPartition } = await api(
+    "POST",
+    `/api/designs/${projDesignId}/zones/${projZone.zone.id}/partitions`,
+    { orderIndex: 0, widthMm: 1200, heightMm: 2400 },
+  );
+  const { json: projPanelResult } = await api(
+    "POST",
+    `/api/designs/${projDesignId}/partitions/${projPartition.id}/panels`,
+    { orderIndex: 0, widthMm: 1200, heightMm: 2400, orientation: "VERTICAL" },
+  );
+  const projPanel = projPanelResult.panel;
+  const [projEdgeStart] = projPanelResult.edges;
+  await api("PUT", `/api/designs/${projDesignId}/geometry-edges/${projEdgeStart.id}`, { requiresTrim: true });
+
+  const projInstance = async (code: string, extra: Record<string, unknown> = {}) => {
+    const { json } = await api("POST", `/api/designs/${projDesignId}/product-instances`, {
+      skuId: await skuId(code),
+      ...extra,
+    });
+    return json;
+  };
+  const projPanelInstance = await projInstance("SKU-PANEL-600", { geometryNodeId: projPanel.id });
+  const projBackSheetInstance = await projInstance("SKU-PVC-BACK-01");
+  const projConnectorInstance = await projInstance("SKU-CONNECTOR-H", { quantity: 1 });
+  const projTrimInstance = await projInstance("SKU-TRIM-EDGE-01");
+  const projFurnitureInstance = await projInstance("SKU-FURN-VANITY-01", {
+    x: 100,
+    y: 100,
+    quantity: 1,
+    sizeOptionId: await furnitureSizeOptionId("SKU-FURN-VANITY-01", "SMALL"),
+  });
+
+  await api("POST", `/api/designs/${projDesignId}/geometry-product-relationships`, {
+    geometryEdgeId: projEdgeStart.id,
+    productInstanceId: projTrimInstance.id,
+    relationshipType: "HAS_TREATMENT",
+  });
+  await api("POST", `/api/designs/${projDesignId}/geometry-product-relationships`, {
+    geometryNodeId: projPanel.id,
+    productInstanceId: projBackSheetInstance.id,
+    relationshipType: "BOUNDARY_OF",
+  });
+  await api("POST", `/api/designs/${projDesignId}/product-instance-edges`, {
+    fromInstanceId: projPanelInstance.id,
+    toInstanceId: projBackSheetInstance.id,
+    edgeType: "REQUIRES",
+    sourceSkuEdgeId: await skuEdgeId("SKU-PANEL-600", "SKU-PVC-BACK-01"),
+  });
+  await api("POST", `/api/designs/${projDesignId}/product-instance-edges`, {
+    fromInstanceId: projPanelInstance.id,
+    toInstanceId: projConnectorInstance.id,
+    edgeType: "REQUIRES",
+    sourceSkuEdgeId: await skuEdgeId("SKU-PANEL-600", "SKU-CONNECTOR-H"),
+  });
+
+  const { json: quantityParam } = await api("POST", `/api/designs/${projDesignId}/parameters`, {
+    targetProductInstanceId: projFurnitureInstance.id,
+    paramKey: "QUANTITY",
+    paramType: "QUANTITY",
+    label: "Quantity",
+    defaultValue: "1",
+  });
+  await api("PUT", `/api/designs/${projDesignId}/parameters/${quantityParam.id}/permission`, {
+    editableByConsultant: true,
+    minValue: 1,
+    maxValue: 5,
+  });
+
+  const { json: edgeTreatmentParam } = await api("POST", `/api/designs/${projDesignId}/parameters`, {
+    targetGeometryEdgeId: projEdgeStart.id,
+    paramKey: "EDGE_TREATMENT",
+    paramType: "EDGE_TREATMENT",
+    label: "Edge Treatment",
+    defaultValue: "SKU-TRIM-EDGE-01",
+  });
+  await api("PUT", `/api/designs/${projDesignId}/parameters/${edgeTreatmentParam.id}/permission`, {
+    editableByConsultant: true,
+    allowedValues: ["SKU-TRIM-EDGE-01", "SKU-CONNECTOR-H"],
+  });
+
+  const { json: projValidation } = await api("POST", `/api/designs/${projDesignId}/validate`, {});
+  if (!projValidation.passed) console.error("Project template validation issues:", projValidation.issues);
+  assert(projValidation.passed === true, "the dedicated Project template passes validation");
+
+  const { json: projBom } = await api("POST", `/api/designs/${projDesignId}/bom`, {});
+  const projMasterBomSnapshot = { id: projBom.id, version: projBom.version, lineCount: projBom.lines.length };
+
+  await api("POST", `/api/designs/${projDesignId}/publish`, {});
+
+  const consultantAEmail = `e2e-throwaway-consultant-a-${Date.now()}@example.com`;
+  await api("POST", "/api/users", {
+    email: consultantAEmail,
+    password: "e2e-consultant-a-pw",
+    name: "E2E Consultant A",
+    role: "CONSULTANT",
+  });
+  const { status: consultantALoginStatus, cookie: consultantACookie } = await api(
+    "POST",
+    "/api/auth/login",
+    { email: consultantAEmail, password: "e2e-consultant-a-pw" },
+    "",
+  );
+  assert(consultantALoginStatus === 200, "throwaway Consultant A can log in");
+
+  const { json: project, status: createProjectStatus } = await api(
+    "POST",
+    "/api/projects",
+    { name: "E2E Project", templateId: projDesignId },
+    consultantACookie,
+  );
+  assert(createProjectStatus === 201, "Consultant creates a Project from a published Template");
+  assert(
+    (project.productInstances as { sourceProductInstanceId: string | null }[]).every((pi) => Boolean(pi.sourceProductInstanceId)),
+    "every returned ProjectProductInstance has a sourceProductInstanceId",
+  );
+
+  const findProjInstance = (sourceId: string) =>
+    (project.productInstances as { id: string; sourceProductInstanceId: string | null }[]).find(
+      (pi) => pi.sourceProductInstanceId === sourceId,
+    );
+  const projectFurnitureInstance = findProjInstance(projFurnitureInstance.id)!;
+  const projectTrimInstance = findProjInstance(projTrimInstance.id)!;
+
+  const { status: outOfBoundsStatus } = await api(
+    "PATCH",
+    `/api/projects/${project.id}/product-instances/${projectFurnitureInstance.id}`,
+    { quantity: 99 },
+    consultantACookie,
+  );
+  assert(outOfBoundsStatus === 400, "an out-of-bounds quantity edit (outside [1,5]) is rejected 400");
+
+  const { status: unpermittedFieldStatus } = await api(
+    "PATCH",
+    `/api/projects/${project.id}/product-instances/${projectFurnitureInstance.id}`,
+    { x: 500 },
+    consultantACookie,
+  );
+  assert(unpermittedFieldStatus === 403, "editing a field with no wired TemplateParameter is rejected 403, not 400");
+
+  const { status: validEditStatus, json: updatedInstance } = await api(
+    "PATCH",
+    `/api/projects/${project.id}/product-instances/${projectFurnitureInstance.id}`,
+    { quantity: 3 },
+    consultantACookie,
+  );
+  assert(validEditStatus === 200, "an in-bounds quantity edit succeeds");
+  assert(updatedInstance.quantity === 3, "the instance's quantity reflects the edit");
+
+  const connectorSkuId = await skuId("SKU-CONNECTOR-H");
+  const { status: treatmentStatus, json: treatmentRel } = await api(
+    "PATCH",
+    `/api/projects/${project.id}/geometry-edges/${projEdgeStart.id}/treatment`,
+    { skuId: connectorSkuId },
+    consultantACookie,
+  );
+  assert(treatmentStatus === 200, "an edge treatment swap to an allowed SKU succeeds");
+  assert(treatmentRel.productInstance.skuId === connectorSkuId, "the relationship's product instance now has the connector SKU");
+
+  const { json: projectAfterSwap } = await api("GET", `/api/projects/${project.id}`, undefined, consultantACookie);
+  const oldTrimStillPresent = (projectAfterSwap.productInstances as { id: string }[]).some(
+    (pi) => pi.id === projectTrimInstance.id,
+  );
+  assert(!oldTrimStillPresent, "the old trim instance was cleaned up after the swap since nothing else references it");
+
+  const decorSkuId = await skuId("SKU-DECOR-PROFILE-01");
+  const { status: disallowedTreatmentStatus } = await api(
+    "PATCH",
+    `/api/projects/${project.id}/geometry-edges/${projEdgeStart.id}/treatment`,
+    { skuId: decorSkuId },
+    consultantACookie,
+  );
+  assert(disallowedTreatmentStatus === 400, "swapping to a SKU not in allowedValues is rejected 400");
+
+  const { status: finalBomStatus, json: finalBom } = await api(
+    "POST",
+    `/api/projects/${project.id}/final-bom`,
+    {},
+    consultantACookie,
+  );
+  assert(finalBomStatus === 201, "Final BOM generation succeeds");
+  const connectorLine = (
+    finalBom.lines as { sourceProjectGeometryProductRelationshipId: string | null; skuId: string }[]
+  ).find((l) => l.sourceProjectGeometryProductRelationshipId === treatmentRel.id);
+  assert(Boolean(connectorLine), "a Final BOM line traces to the swapped relationship");
+  assert(connectorLine?.skuId === connectorSkuId, "that line's SKU is the connector, not the original trim");
+  const finalBomFurnitureLine = (
+    finalBom.lines as { sourceProjectProductInstanceId: string | null; quantity: number }[]
+  ).find((l) => l.sourceProjectProductInstanceId === projectFurnitureInstance.id);
+  assert(finalBomFurnitureLine?.quantity === 3, "the quantity-3 edit is reflected in the Final BOM");
+
+  const { json: templateBomAfter } = await api("GET", `/api/designs/${projDesignId}/bom`, undefined, consultantACookie);
+  assert(templateBomAfter.id === projMasterBomSnapshot.id, "the source Template's Master BOM id is unchanged");
+  assert(templateBomAfter.version === projMasterBomSnapshot.version, "the source Template's Master BOM version is unchanged");
+  assert(
+    templateBomAfter.lines.length === projMasterBomSnapshot.lineCount,
+    "the source Template's Master BOM line count is unchanged -- structurally untouched, not just coincidentally",
+  );
+
+  const consultantBEmail = `e2e-throwaway-consultant-b-${Date.now()}@example.com`;
+  await api("POST", "/api/users", {
+    email: consultantBEmail,
+    password: "e2e-consultant-b-pw",
+    name: "E2E Consultant B",
+    role: "CONSULTANT",
+  });
+  const { cookie: consultantBCookie } = await api(
+    "POST",
+    "/api/auth/login",
+    { email: consultantBEmail, password: "e2e-consultant-b-pw" },
+    "",
+  );
+  const { status: consultantBGetStatus } = await api(
+    "GET",
+    `/api/projects/${project.id}`,
+    undefined,
+    consultantBCookie,
+  );
+  assert(consultantBGetStatus === 403, "a different Consultant is rejected 403 from a Project they don't own");
+
+  const { status: adminGetProjectStatus } = await api("GET", `/api/projects/${project.id}`);
+  assert(adminGetProjectStatus === 200, "ADMIN can access any Project regardless of ownership (bypasses the ownership check)");
+
+  const { status: designerCreateProjectStatus } = await api(
+    "POST",
+    "/api/projects",
+    { name: "Should be blocked", templateId: projDesignId },
+    designerCookie,
+  );
+  assert(designerCreateProjectStatus === 403, "DESIGNER is rejected 403 from creating a Project (zero Project access)");
+
   console.log(`\nAll ${assertions} assertions passed.`);
 }
 

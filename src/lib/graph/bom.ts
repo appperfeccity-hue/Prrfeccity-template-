@@ -1,16 +1,20 @@
 import { prisma } from "@/lib/prisma";
 import { conflict } from "@/lib/api/errors";
 
-type QuantityRule = { type: "FIXED"; value: number } | { type: "PER_LENGTH_MM"; perMm: number };
+export type QuantityRule = { type: "FIXED"; value: number } | { type: "PER_LENGTH_MM"; perMm: number };
 
-type QuantityTargetNode = {
+export type QuantityTargetNode = {
   wall: { lengthMm: number } | null;
   zone: { widthMm: number } | null;
   partition: { widthMm: number } | null;
   panel: { widthMm: number } | null;
 } | null;
 
-function resolveQuantity(rel: {
+// Exported -- reused unchanged by src/lib/graph/final-bom.ts, since this
+// shape is purely structural and the geometry side is always the literal
+// same frozen GeometryNode/GeometryEdge rows regardless of which product
+// graph (Template or Project) is asking.
+export function resolveQuantity(rel: {
   quantityRule: unknown;
   productInstance: { quantity: number };
   geometryNode: QuantityTargetNode;
@@ -41,6 +45,17 @@ export type BomLineInput = {
   sourceProductInstanceEdgeId?: string;
   sourceProductInstanceId?: string;
 };
+
+// Resolves each (skuId, version) pair to its frozen SkuMasterVersion row id.
+// Exported -- reused unchanged by src/lib/graph/final-bom.ts's resolver, so
+// SKU-version pinning has exactly one implementation regardless of which
+// product graph is generating a BOM.
+export async function pinSkuVersions(skusUsed: Map<string, number>): Promise<Map<string, string>> {
+  const versionRows = await prisma.skuMasterVersion.findMany({
+    where: { OR: Array.from(skusUsed, ([skuId, version]) => ({ skuId, version })) },
+  });
+  return new Map(versionRows.map((v) => [v.skuId, v.id]));
+}
 
 /**
  * Pure, non-persisting line computation -- iterates provenance sources
@@ -86,10 +101,7 @@ export async function computeMasterBomLines(designId: string): Promise<BomLineIn
   for (const edge of productInstanceEdges) skusUsed.set(edge.fromInstance.skuId, edge.fromInstance.sku.currentVersion);
   for (const instance of productInstances) skusUsed.set(instance.skuId, instance.sku.currentVersion);
 
-  const versionRows = await prisma.skuMasterVersion.findMany({
-    where: { OR: Array.from(skusUsed, ([skuId, version]) => ({ skuId, version })) },
-  });
-  const versionIdBySkuId = new Map(versionRows.map((v) => [v.skuId, v.id]));
+  const versionIdBySkuId = await pinSkuVersions(skusUsed);
 
   return [
     ...geometryProductRelationships.map((rel) => ({

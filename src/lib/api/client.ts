@@ -21,6 +21,12 @@ import type {
   WallModel as Wall,
   ZoneModel as Zone,
   ZonePartitionModel as ZonePartition,
+  ProjectModel as Project,
+  ProjectProductInstanceModel as ProjectProductInstance,
+  ProjectProductInstanceEdgeModel as ProjectProductInstanceEdge,
+  ProjectGeometryProductRelationshipModel as ProjectGeometryProductRelationship,
+  FinalBomModel as FinalBom,
+  FinalBomLineModel as FinalBomLine,
 } from "@/generated/prisma/models";
 import type { ValidationIssue } from "@/lib/types";
 import type { BomLineInput } from "@/lib/graph/bom";
@@ -65,6 +71,13 @@ export type FullDesign = Design & {
   templateParameters: (TemplateParameter & { permission: ConsultantPermission | null })[];
   validationResults: DesignValidationResult[];
   masterBoms: (MasterBom & { lines: unknown[] })[];
+};
+
+export type FullProject = Project & {
+  template: Design & { templateParameters: (TemplateParameter & { permission: ConsultantPermission | null })[] };
+  productInstances: (ProjectProductInstance & { sku: SkuWithCategory })[];
+  productInstanceEdges: ProjectProductInstanceEdge[];
+  geometryProductRelationships: ProjectGeometryProductRelationship[];
 };
 
 export type GeometryEdgeRelationshipTypeValue =
@@ -293,4 +306,37 @@ export const api = {
   login: (email: string, password: string) => request<SafeUser>("POST", "/auth/login", { email, password }),
   logout: () => request<void>("POST", "/auth/logout", {}),
   getMe: () => request<SafeUser>("GET", "/auth/me"),
+
+  listProjects: () => request<(Project & { template: Design })[]>("GET", "/projects"),
+  createProject: (data: { name: string; templateId: string }) =>
+    request<Project & { productInstances: ProjectProductInstance[] }>("POST", "/projects", data),
+  getProject: (id: string) => request<FullProject>("GET", `/projects/${id}`),
+  deleteProject: (id: string) => request<void>("DELETE", `/projects/${id}`),
+
+  updateProjectProductInstance: (
+    id: string,
+    instanceId: string,
+    data: {
+      quantity?: number;
+      rotationDeg?: number;
+      x?: number;
+      y?: number;
+      z?: number;
+      skuId?: string;
+      designOptionId?: string | null;
+      colourOptionId?: string | null;
+      sizeOptionId?: string | null;
+    },
+  ) => request<ProjectProductInstance>("PATCH", `/projects/${id}/product-instances/${instanceId}`, data),
+
+  setProjectEdgeTreatment: (id: string, edgeId: string, skuId: string) =>
+    request<ProjectGeometryProductRelationship & { productInstance: ProjectProductInstance }>(
+      "PATCH",
+      `/projects/${id}/geometry-edges/${edgeId}/treatment`,
+      { skuId },
+    ),
+
+  getFinalBom: (id: string) => request<FinalBom & { lines: FinalBomLine[] }>("GET", `/projects/${id}/final-bom`),
+  generateFinalBom: (id: string) =>
+    request<FinalBom & { lines: FinalBomLine[] }>("POST", `/projects/${id}/final-bom`, {}),
 };

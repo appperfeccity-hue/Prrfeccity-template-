@@ -33,6 +33,7 @@ model User {
   createdAt    DateTime @default(now())
 
   sessions Session[]
+  projects Project[]
 }
 
 // DB-backed opaque session, not a JWT -- matches this app's "Postgres is the
@@ -110,6 +111,7 @@ model Design {
   templateParameters           TemplateParameter[]
   validationResults            DesignValidationResult[]
   masterBoms                   MasterBom[]
+  projects                     Project[]
 
   @@index([rootTemplateId])
   @@index([status])
@@ -145,13 +147,15 @@ model GeometryNode {
   nodeType GeometryNodeType
   label    String?
 
-  wall                         Wall?
-  zone                         Zone?
-  partition                    ZonePartition?
-  panel                        Panel?
-  edges                        GeometryEdge[]
-  productInstances             ProductInstance[]
-  geometryProductRelationships GeometryProductRelationship[]
+  wall                                Wall?
+  zone                                Zone?
+  partition                           ZonePartition?
+  panel                               Panel?
+  edges                               GeometryEdge[]
+  productInstances                    ProductInstance[]
+  geometryProductRelationships        GeometryProductRelationship[]
+  projectProductInstances             ProjectProductInstance[]
+  projectGeometryProductRelationships ProjectGeometryProductRelationship[]
 
   @@index([designId, nodeType])
 }
@@ -251,10 +255,11 @@ model GeometryEdge {
   isLightingBoundary  Boolean          @default(false)
   metadata            Json?
 
-  edgeRelationshipsAsA         GeometryEdgeRelationship[]    @relation("EdgeA")
-  edgeRelationshipsAsB         GeometryEdgeRelationship[]    @relation("EdgeB")
-  geometryProductRelationships GeometryProductRelationship[]
-  templateParameters           TemplateParameter[]
+  edgeRelationshipsAsA                GeometryEdgeRelationship[]           @relation("EdgeA")
+  edgeRelationshipsAsB                GeometryEdgeRelationship[]           @relation("EdgeB")
+  geometryProductRelationships        GeometryProductRelationship[]
+  templateParameters                  TemplateParameter[]
+  projectGeometryProductRelationships ProjectGeometryProductRelationship[]
 
   @@index([designId, edgeRole])
   @@index([nodeId])
@@ -314,34 +319,35 @@ model Category {
 // mechanism -- a deliberate scope line, not an oversight; see Phase 5 of
 // the plan file for the full reconciliation this implements.
 model SkuMaster {
-  id             String   @id @default(cuid())
-  code           String   @unique
+  id             String    @id @default(cuid())
+  code           String    @unique
   name           String
   categoryId     String
-  category       Category @relation(fields: [categoryId], references: [id])
+  category       Category  @relation(fields: [categoryId], references: [id])
   defaultWidthMm Float?
-  defaultUnit    String   @default("EA")
+  defaultUnit    String    @default("EA")
   minCutPieceMm  Float?
   attributes     Json?
   // Whether a ProductInstance of this SKU may ever have its rotationDeg
   // changed from 0. Enforced server-side in updateProductInstance, not just
   // hidden in the UI -- a catalogue-driven furniture piece (e.g. a
   // wall-fixed unit) may simply not be an approved rotate target.
-  rotatable      Boolean  @default(true)
-  currentVersion Int      @default(1)
+  rotatable      Boolean   @default(true)
+  currentVersion Int       @default(1)
   // Set via POST /api/skus/[id]/discontinue. A discontinued SKU cannot be
   // placed as a NEW ProductInstance (see createProductInstance/
   // autoFillPartition), but every instance/BOM line that already references
   // it -- and its already-frozen SkuMasterVersion snapshots -- stay valid.
   discontinuedAt DateTime?
 
-  edgesFrom        SkuEdge[]               @relation("SkuEdgeFrom")
-  edgesTo          SkuEdge[]               @relation("SkuEdgeTo")
-  productInstances ProductInstance[]
-  designOptions    FurnitureDesignOption[]
-  colourOptions    FurnitureColourOption[]
-  sizeOptions      FurnitureSizeOption[]
-  versions         SkuMasterVersion[]
+  edgesFrom               SkuEdge[]                @relation("SkuEdgeFrom")
+  edgesTo                 SkuEdge[]                @relation("SkuEdgeTo")
+  productInstances        ProductInstance[]
+  designOptions           FurnitureDesignOption[]
+  colourOptions           FurnitureColourOption[]
+  sizeOptions             FurnitureSizeOption[]
+  versions                SkuMasterVersion[]
+  projectProductInstances ProjectProductInstance[]
 
   @@index([categoryId])
 }
@@ -352,7 +358,7 @@ model SkuMaster {
 // old version must keep resolving correctly forever, even after the live
 // SkuMaster has moved on to a newer version.
 model SkuMasterVersion {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   skuId          String
   sku            SkuMaster @relation(fields: [skuId], references: [id], onDelete: Cascade)
   version        Int
@@ -368,6 +374,7 @@ model SkuMasterVersion {
   createdAt      DateTime  @default(now())
 
   masterBomLines MasterBomLine[]
+  finalBomLines  FinalBomLine[]
 
   @@unique([skuId, version])
 }
@@ -385,7 +392,8 @@ model FurnitureDesignOption {
   key   String
   label String
 
-  instances ProductInstance[] @relation("InstanceDesignOption")
+  instances        ProductInstance[]        @relation("InstanceDesignOption")
+  projectInstances ProjectProductInstance[]
 
   @@unique([skuId, key])
 }
@@ -398,7 +406,8 @@ model FurnitureColourOption {
   label       String
   swatchColor String
 
-  instances ProductInstance[] @relation("InstanceColourOption")
+  instances        ProductInstance[]        @relation("InstanceColourOption")
+  projectInstances ProjectProductInstance[]
 
   @@unique([skuId, key])
 }
@@ -417,7 +426,8 @@ model FurnitureSizeOption {
   depthMm  Float
   heightMm Float
 
-  instances ProductInstance[] @relation("InstanceSizeOption")
+  instances        ProductInstance[]        @relation("InstanceSizeOption")
+  projectInstances ProjectProductInstance[]
 
   @@unique([skuId, key])
 }
@@ -443,6 +453,7 @@ model SkuEdge {
   edgeType  SkuEdgeType
 
   productInstanceEdges ProductInstanceEdge[]
+  projectInstanceEdges ProjectProductInstanceEdge[]
 
   @@index([fromSkuId])
   @@index([toSkuId])
@@ -478,6 +489,7 @@ model ProductInstance {
   geometryProductRelationships GeometryProductRelationship[]
   masterBomLinesDirect         MasterBomLine[]               @relation("BomLineFromInstance")
   templateParameters           TemplateParameter[]
+  projectInstances             ProjectProductInstance[]
 
   @@index([designId, skuId])
 }
@@ -507,7 +519,8 @@ model ProductInstanceEdge {
   sourceSkuEdge   SkuEdge?           @relation(fields: [sourceSkuEdgeId], references: [id])
   origin          RelationshipOrigin @default(DESIGNER_DEFINED)
 
-  masterBomLines MasterBomLine[] @relation("BomLineFromInstanceEdge")
+  masterBomLines       MasterBomLine[]              @relation("BomLineFromInstanceEdge")
+  projectInstanceEdges ProjectProductInstanceEdge[]
 
   @@index([designId])
   @@index([fromInstanceId])
@@ -545,7 +558,8 @@ model GeometryProductRelationship {
   quantityRule      Json?
   origin            RelationshipOrigin              @default(DESIGNER_DEFINED)
 
-  masterBomLines MasterBomLine[] @relation("BomLineFromRelationship")
+  masterBomLines                      MasterBomLine[]                      @relation("BomLineFromRelationship")
+  projectGeometryProductRelationships ProjectGeometryProductRelationship[]
 
   @@index([designId])
   @@index([geometryEdgeId])
@@ -612,9 +626,9 @@ model MasterBom {
 }
 
 model MasterBomLine {
-  id            String    @id @default(cuid())
+  id            String            @id @default(cuid())
   masterBomId   String
-  masterBom     MasterBom @relation(fields: [masterBomId], references: [id], onDelete: Cascade)
+  masterBom     MasterBom         @relation(fields: [masterBomId], references: [id], onDelete: Cascade)
   skuId         String
   quantity      Float
   unitOfMeasure String
@@ -633,5 +647,164 @@ model MasterBomLine {
   sourceProductInstance               ProductInstance?             @relation("BomLineFromInstance", fields: [sourceProductInstanceId], references: [id], onDelete: Cascade)
 
   @@index([masterBomId])
+  @@index([skuId])
+}
+
+// ---------------------------------------------------------------------------
+// Consultant Project State (snapshot of a published Template's product graph)
+// ---------------------------------------------------------------------------
+
+// A Consultant's working instance of a published Template. No lifecycle/
+// status field this pass -- edits are always allowed, subject to the
+// bounds-check in src/lib/graph/project.ts; a future "lock once ordered"
+// status is a natural, deferred extension.
+model Project {
+  id              String   @id @default(cuid())
+  name            String
+  templateId      String
+  template        Design   @relation(fields: [templateId], references: [id])
+  createdByUserId String
+  createdBy       User     @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  productInstances             ProjectProductInstance[]
+  productInstanceEdges         ProjectProductInstanceEdge[]
+  geometryProductRelationships ProjectGeometryProductRelationship[]
+  finalBoms                    FinalBom[]
+
+  @@index([templateId])
+  @@index([createdByUserId])
+}
+
+// Snapshot-copied from ProductInstance at Project creation. geometryNodeId
+// is a direct FK into the TEMPLATE's own frozen GeometryNode -- never
+// copied/remapped, since the geometry graph never changes once published.
+// sourceProductInstanceId is nullable -- null only for a Project-only
+// instance synthesized by the EDGE_TREATMENT swap mutator
+// (setProjectEdgeTreatment), which has no Template origin and is therefore
+// never itself further bounded-editable ("chained substitution" -- see the
+// plan file's Phase 5 item 4 section).
+model ProjectProductInstance {
+  id                      String           @id @default(cuid())
+  projectId               String
+  project                 Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceProductInstanceId String?
+  sourceProductInstance   ProductInstance? @relation(fields: [sourceProductInstanceId], references: [id])
+  skuId                   String
+  sku                     SkuMaster        @relation(fields: [skuId], references: [id])
+  geometryNodeId          String?
+  geometryNode            GeometryNode?    @relation(fields: [geometryNodeId], references: [id])
+  x                       Float?
+  y                       Float?
+  z                       Float?
+  rotationDeg             Float            @default(0)
+  quantity                Float            @default(1)
+
+  designOptionId String?
+  designOption   FurnitureDesignOption? @relation(fields: [designOptionId], references: [id])
+  colourOptionId String?
+  colourOption   FurnitureColourOption? @relation(fields: [colourOptionId], references: [id])
+  sizeOptionId   String?
+  sizeOption     FurnitureSizeOption?   @relation(fields: [sizeOptionId], references: [id])
+
+  edgesFrom                    ProjectProductInstanceEdge[]         @relation("ProjectInstanceEdgeFrom")
+  edgesTo                      ProjectProductInstanceEdge[]         @relation("ProjectInstanceEdgeTo")
+  geometryProductRelationships ProjectGeometryProductRelationship[]
+  finalBomLinesDirect          FinalBomLine[]                       @relation("FinalBomLineFromInstance")
+
+  @@index([projectId, skuId])
+  @@index([sourceProductInstanceId])
+}
+
+// Snapshot-copied from ProductInstanceEdge -- always traces back to exactly
+// one Template edge (sourceProductInstanceEdgeId is required: this pass
+// never lets a Consultant create a brand-new product-instance edge).
+model ProjectProductInstanceEdge {
+  id                          String                 @id @default(cuid())
+  projectId                   String
+  project                     Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceProductInstanceEdgeId String
+  sourceProductInstanceEdge   ProductInstanceEdge    @relation(fields: [sourceProductInstanceEdgeId], references: [id])
+  fromInstanceId              String
+  fromInstance                ProjectProductInstance @relation("ProjectInstanceEdgeFrom", fields: [fromInstanceId], references: [id], onDelete: Cascade)
+  toInstanceId                String
+  toInstance                  ProjectProductInstance @relation("ProjectInstanceEdgeTo", fields: [toInstanceId], references: [id], onDelete: Cascade)
+  edgeType                    SkuEdgeType
+  sourceSkuEdgeId             String?
+  sourceSkuEdge               SkuEdge?               @relation(fields: [sourceSkuEdgeId], references: [id])
+
+  finalBomLines FinalBomLine[] @relation("FinalBomLineFromInstanceEdge")
+
+  @@index([projectId])
+  @@index([fromInstanceId])
+  @@index([toInstanceId])
+}
+
+// Snapshot-copied from GeometryProductRelationship. geometryEdgeId /
+// geometryNodeId are direct FKs into the TEMPLATE's frozen rows (never
+// copied); productInstanceId points at a ProjectProductInstance.
+// sourceGeometryProductRelationshipId is required -- this pass only ever
+// UPDATES an existing row's productInstanceId (see setProjectEdgeTreatment),
+// it never creates a brand-new relationship.
+model ProjectGeometryProductRelationship {
+  id                                  String                          @id @default(cuid())
+  projectId                           String
+  project                             Project                         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceGeometryProductRelationshipId String
+  sourceGeometryProductRelationship   GeometryProductRelationship     @relation(fields: [sourceGeometryProductRelationshipId], references: [id])
+  geometryEdgeId                      String?
+  geometryEdge                        GeometryEdge?                   @relation(fields: [geometryEdgeId], references: [id])
+  geometryNodeId                      String?
+  geometryNode                        GeometryNode?                   @relation(fields: [geometryNodeId], references: [id])
+  productInstanceId                   String
+  productInstance                     ProjectProductInstance          @relation(fields: [productInstanceId], references: [id], onDelete: Cascade)
+  relationshipType                    GeometryProductRelationshipType
+  condition                           Json?
+  quantityRule                        Json?
+
+  finalBomLines FinalBomLine[] @relation("FinalBomLineFromRelationship")
+
+  @@index([projectId])
+  @@index([geometryEdgeId])
+  @@index([geometryNodeId])
+  @@index([productInstanceId])
+}
+
+// ---------------------------------------------------------------------------
+// Final BOM (BOM Resolver output) -- Project-scoped, structurally identical
+// discipline to MasterBom/MasterBomLine but never touches those tables.
+// ---------------------------------------------------------------------------
+
+model FinalBom {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version     Int
+  generatedAt DateTime @default(now())
+
+  lines FinalBomLine[]
+
+  @@index([projectId])
+}
+
+model FinalBomLine {
+  id            String            @id @default(cuid())
+  finalBomId    String
+  finalBom      FinalBom          @relation(fields: [finalBomId], references: [id], onDelete: Cascade)
+  skuId         String
+  quantity      Float
+  unitOfMeasure String
+  skuVersionId  String?
+  skuVersion    SkuMasterVersion? @relation(fields: [skuVersionId], references: [id])
+
+  sourceProjectGeometryProductRelationshipId String?
+  sourceProjectGeometryProductRelationship   ProjectGeometryProductRelationship? @relation("FinalBomLineFromRelationship", fields: [sourceProjectGeometryProductRelationshipId], references: [id], onDelete: Cascade)
+  sourceProjectProductInstanceEdgeId         String?
+  sourceProjectProductInstanceEdge           ProjectProductInstanceEdge?         @relation("FinalBomLineFromInstanceEdge", fields: [sourceProjectProductInstanceEdgeId], references: [id], onDelete: Cascade)
+  sourceProjectProductInstanceId             String?
+  sourceProjectProductInstance               ProjectProductInstance?             @relation("FinalBomLineFromInstance", fields: [sourceProjectProductInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([finalBomId])
   @@index([skuId])
 }

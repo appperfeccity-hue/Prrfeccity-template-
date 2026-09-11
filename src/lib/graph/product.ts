@@ -19,7 +19,7 @@ type FurnitureOptionIds = {
 // behind the domain rule "SKU + Design + Colour + Size -> fixed
 // configuration" -- the Canvas/Inspector may only pick from the approved
 // catalogue, never assemble an arbitrary combination.
-async function assertOptionsBelongToSku(skuId: string, options: FurnitureOptionIds) {
+export async function assertOptionsBelongToSku(skuId: string, options: FurnitureOptionIds) {
   const [design, colour, size] = await Promise.all([
     options.designOptionId ? prisma.furnitureDesignOption.findUnique({ where: { id: options.designOptionId } }) : null,
     options.colourOptionId ? prisma.furnitureColourOption.findUnique({ where: { id: options.colourOptionId } }) : null,

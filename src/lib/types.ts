@@ -221,6 +221,27 @@ export const updateEdgeFlagsSchema = z.object({
   isLightingBoundary: z.boolean().optional(),
 });
 
+export const createProjectSchema = z.object({
+  name: z.string().min(1),
+  templateId: z.string(),
+});
+
+export const updateProjectProductInstanceSchema = z.object({
+  quantity: z.number().positive().optional(),
+  rotationDeg: z.number().optional(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+  z: z.number().optional(),
+  skuId: z.string().optional(),
+  designOptionId: z.string().nullable().optional(),
+  colourOptionId: z.string().nullable().optional(),
+  sizeOptionId: z.string().nullable().optional(),
+});
+
+export const setProjectEdgeTreatmentSchema = z.object({
+  skuId: z.string(),
+});
+
 export type ValidationIssueSeverity = "ERROR" | "WARNING";
 
 export type ValidationIssue = {

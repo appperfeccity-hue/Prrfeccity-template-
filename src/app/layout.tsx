@@ -4,6 +4,7 @@ import Link from "next/link";
 import { QueryProvider } from "@/lib/query-provider";
 import { ToastProvider } from "@/lib/toast";
 import { NavUser } from "@/components/layout/NavUser";
+import { NavLinks } from "@/components/layout/NavLinks";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,10 +32,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/" className="topnav-brand">
                 Designer Canvas
               </Link>
-              <nav>
-                <Link href="/">Designs</Link>
-                <Link href="/library">Design Library</Link>
-              </nav>
+              <NavLinks />
               <NavUser />
             </header>
             <main className="app-main">{children}</main>

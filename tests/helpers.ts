@@ -5,6 +5,12 @@ import {
   createGeometryProductRelationship,
   createProductInstanceEdge,
 } from "@/lib/graph/product";
+import { runAndPersistValidation } from "@/lib/graph/validation";
+import { generateMasterBom } from "@/lib/graph/bom";
+import { publishTemplate } from "@/lib/graph/publish";
+import { createProjectFromTemplate } from "@/lib/graph/project";
+import { ENUM_SELECTION_PARAM_KEYS } from "@/lib/graph/constants";
+import type { ParameterType } from "@/generated/prisma/client";
 
 async function skuIdByCode(code: string) {
   const sku = await prisma.skuMaster.findUniqueOrThrow({ where: { code } });
@@ -172,6 +178,228 @@ export async function buildValidTemplateFixture() {
 
 export async function deleteFixtureDesign(designId: string) {
   await prisma.design.delete({ where: { id: designId } });
+}
+
+async function createParam(
+  templateId: string,
+  input: {
+    targetProductInstanceId?: string;
+    targetGeometryEdgeId?: string;
+    paramKey: string;
+    paramType: ParameterType;
+    defaultValue: string;
+    permission: { editableByConsultant: boolean; minValue?: number; maxValue?: number; allowedValues?: string[] };
+  },
+) {
+  const param = await prisma.templateParameter.create({
+    data: {
+      templateId,
+      targetProductInstanceId: input.targetProductInstanceId ?? null,
+      targetGeometryEdgeId: input.targetGeometryEdgeId ?? null,
+      paramKey: input.paramKey,
+      paramType: input.paramType,
+      label: input.paramKey,
+      defaultValue: input.defaultValue,
+    },
+  });
+  await prisma.consultantPermission.create({
+    data: {
+      templateParameterId: param.id,
+      editableByConsultant: input.permission.editableByConsultant,
+      minValue: input.permission.minValue,
+      maxValue: input.permission.maxValue,
+      allowedValues: input.permission.allowedValues ?? [],
+    },
+  });
+  return param;
+}
+
+/**
+ * Builds a small, published Template wired with one TemplateParameter +
+ * ConsultantPermission per paramType (all six), publishes it, then creates a
+ * Project from it -- the shared fixture for tests/project-permissions.test.ts
+ * and tests/final-bom.test.ts. `furnitureSkuCode` defaults to the rotatable
+ * SKU-FURN-VANITY-01; pass "SKU-FURN-STOOL-01" (seeded non-rotatable) to
+ * build a fixture for the "rotation blocked regardless of permission" case.
+ * `createdByUserId` must reference a real User row (createProjectFromTemplate
+ * enforces the FK) -- callers create/clean up that User themselves, matching
+ * the existing tests/auth.test.ts convention.
+ */
+export async function buildPublishedProjectTemplateFixture(
+  createdByUserId: string,
+  opts: { furnitureSkuCode?: string } = {},
+) {
+  const furnitureSkuCode = opts.furnitureSkuCode ?? "SKU-FURN-VANITY-01";
+  const isVanity = furnitureSkuCode === "SKU-FURN-VANITY-01";
+  const designKey = isVanity ? "CLASSIC" : "ROUND";
+  const colourKey = isVanity ? "WHITE" : "BLACK";
+  const sizeKey = isVanity ? "SMALL" : "STANDARD";
+
+  const design = await prisma.design.create({ data: { name: "Project Fixture Template" } });
+
+  const { wall } = await createWall(design.id, {
+    wallType: "STRAIGHT_LTR",
+    lengthMm: 1200,
+    heightMm: 2400,
+  });
+  const { zone } = await createZone(design.id, {
+    wallId: wall.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 1200,
+    heightMm: 2400,
+    hasCoveLighting: false,
+  });
+  const partition = await createPartition(design.id, zone.id, {
+    orderIndex: 0,
+    widthMm: 1200,
+    heightMm: 2400,
+  });
+  const { panel, edges: panelEdges } = await createPanel(design.id, partition.id, {
+    orderIndex: 0,
+    widthMm: 1200,
+    heightMm: 2400,
+    orientation: "VERTICAL",
+  });
+  const [edgeStart, edgeEnd] = panelEdges;
+  await prisma.geometryEdge.update({ where: { id: edgeStart.id }, data: { requiresTrim: true } });
+  await prisma.geometryEdge.update({ where: { id: edgeEnd.id }, data: { requiresConnector: true } });
+
+  const panelInstance = await createProductInstance(design.id, {
+    skuId: await skuIdByCode("SKU-PANEL-600"),
+    geometryNodeId: panel.id,
+    quantity: 1,
+  });
+  const backSheetInstance = await createProductInstance(design.id, {
+    skuId: await skuIdByCode("SKU-PVC-BACK-01"),
+    quantity: 1,
+  });
+  const connectorInstance = await createProductInstance(design.id, {
+    skuId: await skuIdByCode("SKU-CONNECTOR-H"),
+    quantity: 1,
+  });
+  const trimInstance = await createProductInstance(design.id, {
+    skuId: await skuIdByCode("SKU-TRIM-EDGE-01"),
+    quantity: 1,
+  });
+  const furnitureInstance = await createProductInstance(design.id, {
+    skuId: await skuIdByCode(furnitureSkuCode),
+    x: 100,
+    y: 100,
+    z: 0,
+    quantity: 1,
+    designOptionId: await furnitureDesignOptionId(furnitureSkuCode, designKey),
+    colourOptionId: await furnitureColourOptionId(furnitureSkuCode, colourKey),
+    sizeOptionId: await furnitureSizeOptionId(furnitureSkuCode, sizeKey),
+  });
+
+  const relTrim = await createGeometryProductRelationship(design.id, {
+    geometryEdgeId: edgeStart.id,
+    productInstanceId: trimInstance.id,
+    relationshipType: "HAS_TREATMENT",
+  });
+  const relStructural = await createGeometryProductRelationship(design.id, {
+    geometryNodeId: panel.id,
+    productInstanceId: backSheetInstance.id,
+    relationshipType: "BOUNDARY_OF",
+  });
+  // edgeEnd deliberately has no EDGE_TREATMENT TemplateParameter wired to
+  // it -- exercises the "no permission exists at all" 403 case for
+  // setProjectEdgeTreatment, distinct from edgeStart's fully-wired case.
+  const relConnectorAtEnd = await createGeometryProductRelationship(design.id, {
+    geometryEdgeId: edgeEnd.id,
+    productInstanceId: connectorInstance.id,
+    relationshipType: "TERMINATES",
+  });
+
+  const edgeToBackSheet = await createProductInstanceEdge(design.id, {
+    fromInstanceId: panelInstance.id,
+    toInstanceId: backSheetInstance.id,
+    edgeType: "REQUIRES",
+    sourceSkuEdgeId: await skuEdgeId("SKU-PANEL-600", "SKU-PVC-BACK-01", "REQUIRES"),
+  });
+  const edgeToConnector = await createProductInstanceEdge(design.id, {
+    fromInstanceId: panelInstance.id,
+    toInstanceId: connectorInstance.id,
+    edgeType: "REQUIRES",
+    sourceSkuEdgeId: await skuEdgeId("SKU-PANEL-600", "SKU-CONNECTOR-H", "REQUIRES"),
+  });
+
+  const quantityParam = await createParam(design.id, {
+    targetProductInstanceId: furnitureInstance.id,
+    paramKey: "QUANTITY",
+    paramType: "QUANTITY",
+    defaultValue: "1",
+    permission: { editableByConsultant: true, minValue: 1, maxValue: 5 },
+  });
+  const numericRangeParam = await createParam(design.id, {
+    targetProductInstanceId: furnitureInstance.id,
+    paramKey: "ROTATION_DEG",
+    paramType: "NUMERIC_RANGE",
+    defaultValue: "0",
+    permission: { editableByConsultant: true, minValue: 0, maxValue: 360 },
+  });
+  const positionParam = await createParam(design.id, {
+    targetProductInstanceId: furnitureInstance.id,
+    paramKey: "POSITION",
+    paramType: "POSITION",
+    defaultValue: "0",
+    permission: { editableByConsultant: true, minValue: 0, maxValue: 1000 },
+  });
+  const skuSubstitutionParam = await createParam(design.id, {
+    targetProductInstanceId: connectorInstance.id,
+    paramKey: "SKU_SUBSTITUTION",
+    paramType: "SKU_SUBSTITUTION",
+    defaultValue: "SKU-CONNECTOR-H",
+    permission: { editableByConsultant: true, allowedValues: ["SKU-TRIM-EDGE-01"] },
+  });
+  const enumSelectionParam = await createParam(design.id, {
+    targetProductInstanceId: furnitureInstance.id,
+    paramKey: ENUM_SELECTION_PARAM_KEYS.COLOUR_OPTION,
+    paramType: "ENUM_SELECTION",
+    defaultValue: colourKey,
+    permission: { editableByConsultant: true, allowedValues: [colourKey] },
+  });
+  const edgeTreatmentParam = await createParam(design.id, {
+    targetGeometryEdgeId: edgeStart.id,
+    paramKey: "EDGE_TREATMENT",
+    paramType: "EDGE_TREATMENT",
+    defaultValue: "SKU-TRIM-EDGE-01",
+    permission: { editableByConsultant: true, allowedValues: ["SKU-TRIM-EDGE-01", "SKU-CONNECTOR-H"] },
+  });
+
+  await runAndPersistValidation(design.id);
+  const masterBom = await generateMasterBom(design.id);
+  await publishTemplate(design.id);
+
+  const project = await createProjectFromTemplate(design.id, "Fixture Project", createdByUserId);
+
+  const projectInstanceBySourceId = new Map(project.productInstances.map((pi) => [pi.sourceProductInstanceId, pi]));
+
+  return {
+    design,
+    edgeStart,
+    edgeEnd,
+    panel,
+    instances: { panelInstance, backSheetInstance, connectorInstance, trimInstance, furnitureInstance },
+    relationships: { relTrim, relStructural, relConnectorAtEnd },
+    productInstanceEdges: { edgeToBackSheet, edgeToConnector },
+    params: {
+      quantityParam,
+      numericRangeParam,
+      positionParam,
+      skuSubstitutionParam,
+      enumSelectionParam,
+      edgeTreatmentParam,
+    },
+    masterBomSnapshot: { id: masterBom.id, version: masterBom.version, lineCount: masterBom.lines.length },
+    project,
+    projectFurnitureInstance: projectInstanceBySourceId.get(furnitureInstance.id)!,
+    projectConnectorInstance: projectInstanceBySourceId.get(connectorInstance.id)!,
+    projectTrimInstance: projectInstanceBySourceId.get(trimInstance.id)!,
+    projectBackSheetInstance: projectInstanceBySourceId.get(backSheetInstance.id)!,
+    projectPanelInstance: projectInstanceBySourceId.get(panelInstance.id)!,
+  };
 }
 
 /**

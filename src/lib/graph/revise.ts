@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { badRequest } from "@/lib/api/errors";
-import type { Prisma } from "@/generated/prisma/client";
+import type { Prisma, ConstraintTargetKind } from "@/generated/prisma/client";
 
 type Tx = Prisma.TransactionClient;
 
@@ -39,6 +39,7 @@ export async function reviseTemplate(templateId: string) {
     const nodeIdMap = new Map<string, string>();
     const edgeIdMap = new Map<string, string>();
     const instanceIdMap = new Map<string, string>();
+    const fixtureIdMap = new Map<string, string>();
 
     const [segments, zones, partitions, panels] = await Promise.all([
       tx.wallSegment.findMany({ where: { designId: templateId } }),
@@ -258,13 +259,13 @@ export async function reviseTemplate(templateId: string) {
       }
     }
 
-    // Fixtures have no FK dependents of their own -- no id-remap needed for
-    // the row itself, just a plain fetch-and-recreate scoped to the new
-    // child design. wallSegmentId does need remapping via nodeIdMap, same
-    // as ProductInstance's own identical field.
+    // Fixtures had no FK dependents of their own before the Constraint graph
+    // landed -- fixtureIdMap didn't need to exist until a Constraint could
+    // reference a Fixture endpoint. wallSegmentId does need remapping via
+    // nodeIdMap, same as ProductInstance's own identical field.
     const fixtures = await tx.fixture.findMany({ where: { designId: templateId } });
     for (const fx of fixtures) {
-      await tx.fixture.create({
+      const created = await tx.fixture.create({
         data: {
           designId: child.id,
           fixtureType: fx.fixtureType,
@@ -275,6 +276,64 @@ export async function reviseTemplate(templateId: string) {
           widthMm: fx.widthMm,
           heightMm: fx.heightMm,
           clearanceMm: fx.clearanceMm,
+        },
+      });
+      fixtureIdMap.set(fx.id, created.id);
+    }
+
+    // Constraint endpoints are remapped via whichever id map matches their
+    // kind -- Fixture/ProductInstance/GeometryNode/GeometryEdge -- all four
+    // maps are populated by this point. Must run after every other loop
+    // above, or a revised Template would silently lose every Constraint,
+    // the same ripple-effect bug class already caught for RelationshipOrigin,
+    // the three Furniture-option FKs, Fixture, and WallJunction.
+    const remapEndpoint = (
+      kind: ConstraintTargetKind | null,
+      fixtureId: string | null,
+      productInstanceId: string | null,
+      geometryNodeId: string | null,
+      geometryEdgeId: string | null,
+    ): { kind: ConstraintTargetKind; id: string } | null => {
+      if (kind === "FIXTURE") return { kind, id: fixtureIdMap.get(fixtureId!)! };
+      if (kind === "PRODUCT_INSTANCE") return { kind, id: instanceIdMap.get(productInstanceId!)! };
+      if (kind === "GEOMETRY_NODE") return { kind, id: nodeIdMap.get(geometryNodeId!)! };
+      if (kind === "GEOMETRY_EDGE") return { kind, id: edgeIdMap.get(geometryEdgeId!)! };
+      return null;
+    };
+    const constraints = await tx.constraint.findMany({ where: { designId: templateId } });
+    for (const c of constraints) {
+      const a = remapEndpoint(
+        c.targetAKind,
+        c.targetAFixtureId,
+        c.targetAProductInstanceId,
+        c.targetAGeometryNodeId,
+        c.targetAGeometryEdgeId,
+      )!;
+      const b = remapEndpoint(
+        c.targetBKind,
+        c.targetBFixtureId,
+        c.targetBProductInstanceId,
+        c.targetBGeometryNodeId,
+        c.targetBGeometryEdgeId,
+      );
+      await tx.constraint.create({
+        data: {
+          designId: child.id,
+          constraintType: c.constraintType,
+          axis: c.axis,
+          valueMm: c.valueMm,
+          minValueMm: c.minValueMm,
+          maxValueMm: c.maxValueMm,
+          targetAKind: a.kind,
+          targetAFixtureId: a.kind === "FIXTURE" ? a.id : null,
+          targetAProductInstanceId: a.kind === "PRODUCT_INSTANCE" ? a.id : null,
+          targetAGeometryNodeId: a.kind === "GEOMETRY_NODE" ? a.id : null,
+          targetAGeometryEdgeId: a.kind === "GEOMETRY_EDGE" ? a.id : null,
+          targetBKind: b?.kind ?? null,
+          targetBFixtureId: b?.kind === "FIXTURE" ? b.id : null,
+          targetBProductInstanceId: b?.kind === "PRODUCT_INSTANCE" ? b.id : null,
+          targetBGeometryNodeId: b?.kind === "GEOMETRY_NODE" ? b.id : null,
+          targetBGeometryEdgeId: b?.kind === "GEOMETRY_EDGE" ? b.id : null,
         },
       });
     }

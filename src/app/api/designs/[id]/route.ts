@@ -35,6 +35,7 @@ export async function GET(
         validationResults: { orderBy: { ranAt: "desc" }, take: 1 },
         masterBoms: { orderBy: { version: "desc" }, take: 1, include: { lines: true } },
         fixtures: true,
+        constraints: true,
       },
     });
     if (!design) throw notFound(`Design ${id} not found`);

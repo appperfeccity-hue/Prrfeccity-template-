@@ -1234,6 +1234,152 @@ async function main() {
     "a Consultant is rejected 403 from creating a Fixture -- Fixtures are DESIGNER/ADMIN-authored Template data",
   );
 
+  // 20. Constraint Graph: a stored, declarative spatial fact -- validation-
+  // only, never a solver that moves geometry. Proves FIXED_POSITION and
+  // DISTANCE (the latter anchored to a real wall GeometryEdge) actually flip
+  // CONSTRAINT_SATISFIED on/off as the constrained target moves, that
+  // shape-invalid pairings are rejected 400 at creation time, and that
+  // delete + RBAC both hold, matching sections 18/19's own style.
+  console.log("\n20. Constraint Graph: FIXED_POSITION/DISTANCE satisfaction, shape rejection, deletion, RBAC");
+
+  const { json: conDesign } = await api("POST", "/api/designs", { name: "E2E Constraint Template" });
+  const conDesignId: string = conDesign.id;
+
+  const { json: conWall } = await api("PUT", `/api/designs/${conDesignId}/wall-segments/first`, {
+    lengthMm: 2000,
+    heightMm: 2400,
+  });
+  const conLeftEdge = conWall.edges.find((e: { edgeRole: string }) => e.edgeRole === "LEFT");
+  assert(Boolean(conLeftEdge), "the wall segment's LEFT edge is available as a Constraint anchor");
+
+  const { json: conFurnitureInstance } = await api("POST", `/api/designs/${conDesignId}/product-instances`, {
+    skuId: await skuId("SKU-FURN-VANITY-01"),
+    wallSegmentId: conWall.segment.id,
+    x: 900,
+    y: 150,
+    quantity: 1,
+    sizeOptionId: await furnitureSizeOptionId("SKU-FURN-VANITY-01", "SMALL"),
+  });
+
+  const { json: conFixture } = await api("POST", `/api/designs/${conDesignId}/fixtures`, {
+    fixtureType: "WINDOW",
+    wallSegmentId: conWall.segment.id,
+    xMm: 100,
+    yMm: 200,
+    widthMm: 300,
+    heightMm: 400,
+  });
+
+  const { status: fixedPosStatus, json: fixedPosConstraint } = await api("POST", `/api/designs/${conDesignId}/constraints`, {
+    constraintType: "FIXED_POSITION",
+    targetA: { kind: "PRODUCT_INSTANCE", id: conFurnitureInstance.id },
+    axis: "X",
+    valueMm: 900,
+  });
+  assert(fixedPosStatus === 201, "creating a FIXED_POSITION constraint at the instance's own current X succeeds");
+
+  const { json: conCleanValidation } = await api("POST", `/api/designs/${conDesignId}/validate`, {});
+  assert(
+    !conCleanValidation.issues.some((i: { code: string }) => i.code === "CONSTRAINT_SATISFIED"),
+    "the FIXED_POSITION constraint is satisfied while the instance sits at its pinned X",
+  );
+
+  await api("PATCH", `/api/designs/${conDesignId}/product-instances/${conFurnitureInstance.id}`, { x: 400 });
+  const { json: conViolatedValidation } = await api("POST", `/api/designs/${conDesignId}/validate`, {});
+  const conIssue = conViolatedValidation.issues.find((i: { code: string }) => i.code === "CONSTRAINT_SATISFIED");
+  assert(Boolean(conIssue), "moving the instance away from its pinned X trips CONSTRAINT_SATISFIED");
+  assert(conIssue?.refId === fixedPosConstraint.id, "the issue references the violated constraint's own id");
+  assert(conIssue?.severity === "ERROR", "CONSTRAINT_SATISFIED is an ERROR (blocks publish)");
+
+  await api("PATCH", `/api/designs/${conDesignId}/product-instances/${conFurnitureInstance.id}`, { x: 900 });
+  const { json: conBackToCleanValidation } = await api("POST", `/api/designs/${conDesignId}/validate`, {});
+  assert(
+    !conBackToCleanValidation.issues.some((i: { code: string }) => i.code === "CONSTRAINT_SATISFIED"),
+    "moving the instance back to its pinned X clears CONSTRAINT_SATISFIED again",
+  );
+
+  const { status: distanceStatus, json: distanceConstraint } = await api("POST", `/api/designs/${conDesignId}/constraints`, {
+    constraintType: "DISTANCE",
+    targetA: { kind: "FIXTURE", id: conFixture.id },
+    targetB: { kind: "GEOMETRY_EDGE", id: conLeftEdge.id },
+    axis: "X",
+    valueMm: 100,
+  });
+  assert(distanceStatus === 201, "creating a DISTANCE constraint anchored to the wall's LEFT edge succeeds");
+
+  const { json: conDistanceCleanValidation } = await api("POST", `/api/designs/${conDesignId}/validate`, {});
+  assert(
+    !conDistanceCleanValidation.issues.some(
+      (i: { code: string; refId?: string }) => i.code === "CONSTRAINT_SATISFIED" && i.refId === distanceConstraint.id,
+    ),
+    "the DISTANCE constraint is satisfied at the fixture's own current 100mm offset from the LEFT edge",
+  );
+
+  await api("PATCH", `/api/designs/${conDesignId}/fixtures/${conFixture.id}`, { xMm: 500 });
+  const { json: conDistanceViolatedValidation } = await api("POST", `/api/designs/${conDesignId}/validate`, {});
+  assert(
+    conDistanceViolatedValidation.issues.some(
+      (i: { code: string; refId?: string }) => i.code === "CONSTRAINT_SATISFIED" && i.refId === distanceConstraint.id,
+    ),
+    "moving the fixture off its required 100mm offset trips the DISTANCE constraint",
+  );
+
+  await api("PATCH", `/api/designs/${conDesignId}/fixtures/${conFixture.id}`, { xMm: 100 });
+  const { json: conDistanceBackToCleanValidation } = await api("POST", `/api/designs/${conDesignId}/validate`, {});
+  assert(
+    !conDistanceBackToCleanValidation.issues.some(
+      (i: { code: string; refId?: string }) => i.code === "CONSTRAINT_SATISFIED" && i.refId === distanceConstraint.id,
+    ),
+    "moving the fixture back to the 100mm offset clears the DISTANCE constraint again",
+  );
+
+  const { status: centerAnchorPairStatus } = await api("POST", `/api/designs/${conDesignId}/constraints`, {
+    constraintType: "CENTER",
+    targetA: { kind: "GEOMETRY_NODE", id: conWall.segment.id },
+    targetB: { kind: "GEOMETRY_EDGE", id: conLeftEdge.id },
+    axis: "X",
+  });
+  assert(centerAnchorPairStatus === 400, "a both-anchor-only pairing (no Fixture/ProductInstance side) is rejected 400");
+
+  const { status: equalGeometryNodeStatus } = await api("POST", `/api/designs/${conDesignId}/constraints`, {
+    constraintType: "EQUAL",
+    targetA: { kind: "FIXTURE", id: conFixture.id },
+    targetB: { kind: "GEOMETRY_NODE", id: conWall.segment.id },
+    axis: "X",
+  });
+  assert(equalGeometryNodeStatus === 400, "EQUAL is scoped to Fixture/ProductInstance pairs only -- a GEOMETRY_NODE side is rejected 400");
+
+  const { status: deleteConstraintStatus } = await api("DELETE", `/api/designs/${conDesignId}/constraints/${distanceConstraint.id}`);
+  assert(deleteConstraintStatus === 204, "deleting a Constraint succeeds");
+  const { json: constraintsAfterDelete } = await api("GET", `/api/designs/${conDesignId}/constraints`);
+  assert(
+    !constraintsAfterDelete.some((c: { id: string }) => c.id === distanceConstraint.id),
+    "the deleted constraint no longer appears in a subsequent GET",
+  );
+
+  const { status: consultantCreateConstraintStatus } = await api(
+    "POST",
+    `/api/designs/${conDesignId}/constraints`,
+    {
+      constraintType: "FIXED_POSITION",
+      targetA: { kind: "FIXTURE", id: conFixture.id },
+      axis: "X",
+      valueMm: 100,
+    },
+    consultantACookie,
+  );
+  assert(
+    consultantCreateConstraintStatus === 403,
+    "a Consultant is rejected 403 from creating a Constraint -- Constraints are DESIGNER/ADMIN-authored Template data",
+  );
+  const { status: consultantDeleteConstraintStatus } = await api(
+    "DELETE",
+    `/api/designs/${conDesignId}/constraints/${fixedPosConstraint.id}`,
+    undefined,
+    consultantACookie,
+  );
+  assert(consultantDeleteConstraintStatus === 403, "a Consultant is rejected 403 from deleting a Constraint");
+
   console.log(`\nAll ${assertions} assertions passed.`);
 }
 

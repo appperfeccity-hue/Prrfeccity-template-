@@ -22,6 +22,8 @@ import { Inspector } from "@/components/inspector/Inspector";
 import { SkuPalette, type SkuDragPayload } from "@/components/palette/SkuPalette";
 import { FurnitureCatalogue, type ArmedFurniture } from "@/components/palette/FurnitureCatalogue";
 import { FixturePalette, type ArmedFixture } from "@/components/palette/FixturePalette";
+import { ConstraintPalette, type ArmedConstraint, type ConstraintConfig } from "@/components/palette/ConstraintPalette";
+import type { ConstraintTargetInput, ConstraintTypeValue } from "@/lib/api/client";
 
 const DROP_RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOUNDARY_OF", "POSITIONED_AT", "ADJACENT_TO"];
 
@@ -57,6 +59,7 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   const [dropRelationshipType, setDropRelationshipType] = useState(DROP_RELATIONSHIP_TYPES[0]);
   const [armedFurniture, setArmedFurniture] = useState<ArmedFurniture | null>(null);
   const [armedFixture, setArmedFixture] = useState<ArmedFixture | null>(null);
+  const [armedConstraint, setArmedConstraint] = useState<ArmedConstraint | null>(null);
   const furnitureSkus = (skusQuery.data ?? []).filter((s) => s.category.key === "FURNITURE");
   const nonFurnitureSkus = (skusQuery.data ?? []).filter((s) => s.category.key !== "FURNITURE");
 
@@ -312,6 +315,35 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
     },
   });
 
+  const createConstraintMutation = useMutation({
+    mutationFn: (variables: {
+      constraintType: ConstraintTypeValue;
+      targetA: ConstraintTargetInput;
+      targetB?: ConstraintTargetInput | null;
+      axis: ConstraintConfig["axis"];
+      valueMm?: number;
+      minValueMm?: number;
+      maxValueMm?: number;
+    }) => api.createConstraint(id, variables),
+    onSuccess: (result, variables) => {
+      invalidate();
+      setArmedConstraint(null);
+      let currentId = result.id;
+      pushAction({
+        description: `Add ${variables.constraintType} constraint`,
+        undo: async () => {
+          await api.deleteConstraint(id, currentId);
+          invalidate();
+        },
+        redo: async () => {
+          const r = await api.createConstraint(id, variables);
+          currentId = r.id;
+          invalidate();
+        },
+      });
+    },
+  });
+
   if (!design) return null;
 
   const findPanel = (panelId: string) => design.geometryNodes.find((n) => n.id === panelId)?.panel;
@@ -388,6 +420,25 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   const handleDeletePanel = (panelId: string) => api.deleteGeometryNode(id, panelId).then(invalidate);
   const handleDeleteInstance = (instanceId: string) => api.deleteProductInstance(id, instanceId).then(invalidate);
   const handleDeleteFixture = (fixtureId: string) => api.deleteFixture(id, fixtureId).then(invalidate);
+  const handleDeleteConstraint = (constraintId: string) => api.deleteConstraint(id, constraintId).then(invalidate);
+
+  // Advances the click-to-pick state machine as DesignStage forwards picked
+  // canvas targets -- FIXED_POSITION has no target B, so target A resolves
+  // straight to CONFIGURE for it; every other type goes through PICK_B first.
+  const handlePickConstraintTarget = (ref: ConstraintTargetInput) => {
+    if (!armedConstraint) return;
+    if (armedConstraint.step === "PICK_A") {
+      if (armedConstraint.constraintType === "FIXED_POSITION") {
+        setArmedConstraint({ step: "CONFIGURE", constraintType: armedConstraint.constraintType, targetA: ref, targetB: null });
+      } else {
+        setArmedConstraint({ step: "PICK_B", constraintType: armedConstraint.constraintType, targetA: ref });
+      }
+      return;
+    }
+    if (armedConstraint.step === "PICK_B") {
+      setArmedConstraint({ step: "CONFIGURE", constraintType: armedConstraint.constraintType, targetA: armedConstraint.targetA, targetB: ref });
+    }
+  };
 
   const handleDropSku = (payload: SkuDragPayload, target: DesignStageDropTarget | null) => {
     // Furniture is never draggable from the generic palette -- it only ever
@@ -461,6 +512,7 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
             createFixtureMutation.mutate({ ...armedFixture, xMm, yMm, wallSegmentId: activeSegmentId ?? undefined });
           }}
           onMoveFixture={handleMoveFixture}
+          pickTarget={armedConstraint && armedConstraint.step !== "CONFIGURE" ? handlePickConstraintTarget : undefined}
         />
         <div className="flex flex-col gap-3">
           {selection && (
@@ -483,6 +535,7 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
               onDeletePartition={(partitionId) => handleDeletePartition(partitionId)}
               onUpdateFixture={handleUpdateFixture}
               onDeleteFixture={(fixtureId) => handleDeleteFixture(fixtureId)}
+              onDeleteConstraint={(constraintId) => handleDeleteConstraint(constraintId)}
             />
           )}
           <FurnitureCatalogue
@@ -490,6 +543,7 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
             armed={armedFurniture}
             onArm={(f) => {
               setArmedFixture(null);
+              setArmedConstraint(null);
               setArmedFurniture(f);
             }}
           />
@@ -497,8 +551,32 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
             armed={armedFixture}
             onArm={(f) => {
               setArmedFurniture(null);
+              setArmedConstraint(null);
               setArmedFixture(f);
             }}
+          />
+          <ConstraintPalette
+            armed={armedConstraint}
+            onStart={(constraintType) => {
+              setArmedFurniture(null);
+              setArmedFixture(null);
+              setArmedConstraint({ step: "PICK_A", constraintType });
+            }}
+            onCancel={() => setArmedConstraint(null)}
+            onCreate={(config) => {
+              if (!armedConstraint || armedConstraint.step !== "CONFIGURE") return;
+              createConstraintMutation.mutate({
+                constraintType: armedConstraint.constraintType,
+                targetA: armedConstraint.targetA,
+                targetB: armedConstraint.targetB,
+                axis: config.axis,
+                valueMm: config.valueMm,
+                minValueMm: config.minValueMm,
+                maxValueMm: config.maxValueMm,
+              });
+            }}
+            isPending={createConstraintMutation.isPending}
+            error={createConstraintMutation.isError ? (createConstraintMutation.error as Error).message : null}
           />
           <SkuPalette skus={nonFurnitureSkus} />
         </div>

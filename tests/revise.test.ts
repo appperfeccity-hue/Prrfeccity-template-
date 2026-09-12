@@ -7,6 +7,7 @@ import { runAndPersistValidation } from "@/lib/graph/validation";
 import { createWallSegment, addWallSegment, createZone, createPartition, createPanel, autoFillPartition } from "@/lib/graph/geometry";
 import { createProductInstance, createGeometryProductRelationship, createProductInstanceEdge } from "@/lib/graph/product";
 import { createFixture } from "@/lib/graph/fixture";
+import { createConstraint } from "@/lib/graph/constraint";
 import { buildValidTemplateFixture, deleteFixtureDesign, snapshotSemanticState } from "./helpers";
 
 let designIdsToCleanUp: string[] = [];
@@ -232,7 +233,7 @@ describe("reviseTemplate", () => {
       wallSegmentId: segment0.id,
       quantity: 1,
     });
-    await createProductInstance(design.id, {
+    const furnitureInstance = await createProductInstance(design.id, {
       skuId: furnitureSku.id,
       wallSegmentId: segment0.id,
       x: 150,
@@ -285,6 +286,17 @@ describe("reviseTemplate", () => {
     });
     await prisma.consultantPermission.create({
       data: { templateParameterId: param.id, editableByConsultant: true, minValue: 600, maxValue: 1500 },
+    });
+
+    // Pins the furniture instance's own current X -- genuinely satisfied, so
+    // it doesn't break the passed===true assertion below, while exercising
+    // the new Constraint copy loop in revise.ts (this pass's ripple-effect
+    // fix) and snapshotSemanticState's new endpointKey/constraints entries.
+    await createConstraint(design.id, {
+      constraintType: "FIXED_POSITION",
+      targetA: { kind: "PRODUCT_INSTANCE", id: furnitureInstance.id },
+      axis: "X",
+      valueMm: 150,
     });
 
     // Placed far from every instance's footprint so it doesn't trip

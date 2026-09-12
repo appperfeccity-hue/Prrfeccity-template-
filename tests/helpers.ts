@@ -420,7 +420,7 @@ export async function buildPublishedProjectTemplateFixture(
  * structural position, which is always unique.
  */
 export async function snapshotSemanticState(designId: string) {
-  const [segments, junctions, zones, partitions, panels, edges, edgeRelationships, instances, instanceEdges, geoProductRels, params, fixtures] =
+  const [segments, junctions, zones, partitions, panels, edges, edgeRelationships, instances, instanceEdges, geoProductRels, params, fixtures, constraints] =
     await Promise.all([
       prisma.wallSegment.findMany({ where: { designId }, orderBy: { sequence: "asc" } }),
       prisma.wallJunction.findMany({ where: { designId } }),
@@ -437,6 +437,7 @@ export async function snapshotSemanticState(designId: string) {
       prisma.geometryProductRelationship.findMany({ where: { designId } }),
       prisma.templateParameter.findMany({ where: { templateId: designId }, include: { permission: true } }),
       prisma.fixture.findMany({ where: { designId } }),
+      prisma.constraint.findMany({ where: { designId } }),
     ]);
 
   const segmentSequence = (segmentId: string | null): number | null => {
@@ -480,6 +481,35 @@ export async function snapshotSemanticState(designId: string) {
       inst.geometryNodeId ? `${nodeKey(inst.geometryNodeId)}/sku:${inst.sku.code}` : `freestanding/sku:${inst.sku.code}`,
     );
   }
+
+  // Fixture rows have no natural structural key the way geometry-attached
+  // instances do -- a value-based key is the honest choice here. Built as an
+  // id-lookup map (rather than computed inline where used) because
+  // Constraint endpoints need to resolve a fixture's key by id, same as
+  // instanceKeyById already does for ProductInstance.
+  const fixtureKeyById = new Map<string, string>();
+  for (const fx of fixtures) {
+    fixtureKeyById.set(fx.id, `fixture:${fx.fixtureType}:${fx.xMm},${fx.yMm}`);
+  }
+
+  // Resolves a Constraint endpoint (kind + one of its 4 id columns) to the
+  // same structural/value key its own entity type already uses elsewhere in
+  // this snapshot -- keeps a Constraint's identity independent of raw ids
+  // across parent/child Template revisions, exactly like every other
+  // relationship in this snapshot.
+  const endpointKey = (
+    kind: string | null,
+    fixtureId: string | null,
+    productInstanceId: string | null,
+    geometryNodeId: string | null,
+    geometryEdgeId: string | null,
+  ): string | null => {
+    if (kind === "FIXTURE") return fixtureId ? (fixtureKeyById.get(fixtureId) ?? null) : null;
+    if (kind === "PRODUCT_INSTANCE") return productInstanceId ? (instanceKeyById.get(productInstanceId) ?? null) : null;
+    if (kind === "GEOMETRY_NODE") return geometryNodeId ? nodeKey(geometryNodeId) : null;
+    if (kind === "GEOMETRY_EDGE") return geometryEdgeId ? edgeKey(geometryEdgeId) : null;
+    return null;
+  };
 
   const byKey = <T extends { key: string }>(rows: T[]) => rows.sort((a, b) => a.key.localeCompare(b.key));
 
@@ -594,11 +624,9 @@ export async function snapshotSemanticState(designId: string) {
         },
       }))
       .sort((a, b) => a.paramKey.localeCompare(b.paramKey)),
-    // Fixture rows have no natural structural key the way geometry-attached
-    // instances do -- a value-based key is the honest choice here.
     fixtures: fixtures
       .map((fx) => ({
-        key: `fixture:${fx.fixtureType}:${fx.xMm},${fx.yMm}`,
+        key: fixtureKeyById.get(fx.id)!,
         fixtureType: fx.fixtureType,
         label: fx.label,
         xMm: fx.xMm,
@@ -607,6 +635,36 @@ export async function snapshotSemanticState(designId: string) {
         heightMm: fx.heightMm,
         clearanceMm: fx.clearanceMm,
       }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
+    constraints: constraints
+      .map((c) => {
+        const aKey = endpointKey(
+          c.targetAKind,
+          c.targetAFixtureId,
+          c.targetAProductInstanceId,
+          c.targetAGeometryNodeId,
+          c.targetAGeometryEdgeId,
+        );
+        const bKey = c.targetBKind
+          ? endpointKey(
+              c.targetBKind,
+              c.targetBFixtureId,
+              c.targetBProductInstanceId,
+              c.targetBGeometryNodeId,
+              c.targetBGeometryEdgeId,
+            )
+          : null;
+        return {
+          key: `${c.constraintType}:${c.axis}:${aKey}<->${bKey}:${c.valueMm}:${c.minValueMm}:${c.maxValueMm}`,
+          constraintType: c.constraintType,
+          axis: c.axis,
+          targetAKey: aKey,
+          targetBKey: bKey,
+          valueMm: c.valueMm,
+          minValueMm: c.minValueMm,
+          maxValueMm: c.maxValueMm,
+        };
+      })
       .sort((a, b) => a.key.localeCompare(b.key)),
   };
 }

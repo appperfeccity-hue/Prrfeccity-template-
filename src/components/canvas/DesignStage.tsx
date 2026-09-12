@@ -22,11 +22,44 @@ import { TrimsLayer } from "@/components/canvas/layers/TrimsLayer";
 import { MeasurementsLayer } from "@/components/canvas/layers/MeasurementsLayer";
 import { SelectionLayer } from "@/components/canvas/layers/SelectionLayer";
 import { GridOverlayLayer } from "@/components/canvas/layers/GridOverlayLayer";
+import { ConstraintLayer } from "@/components/canvas/layers/ConstraintLayer";
+import type { CanvasSelectionItem } from "@/lib/canvas/store";
 
 export type DesignStageDropTarget =
   | { kind: "partition"; id: string }
   | { kind: "panel"; id: string }
   | { kind: "edge"; id: string };
+
+export type ConstraintTargetRef = {
+  kind: "FIXTURE" | "PRODUCT_INSTANCE" | "GEOMETRY_NODE" | "GEOMETRY_EDGE";
+  id: string;
+};
+
+// wall/zone/partition/panel all share their PK with a GeometryNode row (see
+// prisma/schema.prisma) -- they all resolve to a GEOMETRY_NODE Constraint
+// target. "edge" resolves to GEOMETRY_EDGE; "instance"/"fixture" resolve to
+// their own freestanding kinds directly.
+function canvasItemToConstraintTarget(item: CanvasSelectionItem): ConstraintTargetRef {
+  switch (item.kind) {
+    case "wall":
+    case "zone":
+    case "partition":
+    case "panel":
+      return { kind: "GEOMETRY_NODE", id: item.id };
+    case "edge":
+      return { kind: "GEOMETRY_EDGE", id: item.id };
+    case "instance":
+      return { kind: "PRODUCT_INSTANCE", id: item.id };
+    case "fixture":
+      return { kind: "FIXTURE", id: item.id };
+    case "constraint":
+      // Not a valid Constraint endpoint -- a constraint can't target another
+      // constraint. Unreachable in practice (ConstraintLayer's own click
+      // handler never fires while pickTarget is armed), kept exhaustive
+      // rather than throwing so this stays a total function.
+      return { kind: "GEOMETRY_NODE", id: item.id };
+  }
+}
 
 const STAGE_WIDTH = 960;
 const STAGE_HEIGHT = 600;
@@ -35,9 +68,7 @@ const ZOOM_FACTOR = 1.1;
 /**
  * The unified interactive canvas (UI-M4). One Konva Stage, one mm coordinate
  * system (via src/lib/canvas/{layout,coords,viewport}.ts), zoom/pan/selection
- * driven by the shared canvas store (src/lib/canvas/store.tsx). Renders in
- * the authoritative layer order: Grid, Wall, Zones, SKU placement, Lighting,
- * Furniture, Trims, Measurements, Selection, Grid overlay.
+ * driven by the shared canvas store (src/lib/canvas/store.tsx).
  *
  * DesignStage does no domain computation itself -- computeZoneLayout (pure
  * mm geometry) and every mutation callback below are owned elsewhere and
@@ -46,7 +77,12 @@ const ZOOM_FACTOR = 1.1;
  * WallCanvas/ZoneCanvas/FurnitureCanvas used to do individually.
  *
  * Authoritative layer order: Grid, Wall, Zones, SKU placement, Lighting,
- * Fixture, Furniture, Trims, Measurements, Selection, Grid overlay.
+ * Fixture, Furniture, Trims, Constraint, Measurements, Selection, Grid
+ * overlay. While `pickTarget` is set (a Constraint's target A/B is being
+ * picked), every layer's onSelect (and onSelectEdge) callback resolves
+ * through `handleSelect`, which routes to `pickTarget` instead of the canvas
+ * store's own `select` -- see ConstraintLayer/ConstraintPalette for the
+ * authoring flow this feeds.
  */
 export function DesignStage({
   design,
@@ -59,6 +95,7 @@ export function DesignStage({
   onRotateFurniture,
   onPlaceFixture,
   onMoveFixture,
+  pickTarget,
 }: {
   design: FullDesign;
   onSelectEdge?: (edge: GeometryEdgeModel) => void;
@@ -70,11 +107,23 @@ export function DesignStage({
   onRotateFurniture?: (instanceId: string, rotationDeg: number) => void;
   onPlaceFixture?: (xMm: number, yMm: number) => void;
   onMoveFixture?: (fixtureId: string, xMm: number, yMm: number) => void;
+  // Set only while a Constraint pick is in progress -- when present, every
+  // click that would normally select an item instead resolves target A/B
+  // for the armed Constraint and does NOT write to the store's selection.
+  pickTarget?: (ref: ConstraintTargetRef) => void;
 }) {
   const stageRef = useRef<Konva.Stage>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragPreviewMm, setDragPreviewMm] = useState<MmPoint | null>(null);
   const { selection, activeTool, viewport, layerVisibility, snapEnabled, activeSegmentId, select, setViewport } = useCanvasStore();
+
+  const handleSelect = (item: CanvasSelectionItem) => {
+    if (pickTarget) {
+      pickTarget(canvasItemToConstraintTarget(item));
+      return;
+    }
+    select(item);
+  };
 
   // No true 2D bent rendering this pass -- each segment renders its own flat
   // elevation; the segment tab bar (DesignStageSection) switches which one
@@ -119,7 +168,9 @@ export function DesignStage({
 
   const handleStageClick = (e: KonvaEventObject<MouseEvent | TouchEvent>) => {
     if (e.target !== e.target.getStage()) return;
-    select(null);
+    // An empty-canvas click while a Constraint pick is armed does nothing
+    // and stays armed -- there is no "target" to resolve from empty space.
+    if (!pickTarget) select(null);
     const stage = e.target.getStage();
     const relative = stage?.getRelativePointerPosition();
     if (!relative) return;
@@ -216,15 +267,15 @@ export function DesignStage({
             wall={wall}
             edges={activeSegmentNode.edges}
             selection={selection}
-            onSelectWall={() => select({ kind: "wall", id: wall.id })}
+            onSelectWall={() => handleSelect({ kind: "wall", id: wall.id })}
           />
 
           <ZonesLayer
             layout={layout}
             selection={selection}
-            onSelectZone={(id) => select({ kind: "zone", id })}
-            onSelectPartition={(id) => select({ kind: "partition", id })}
-            onSelectPanel={(id) => select({ kind: "panel", id })}
+            onSelectZone={(id) => handleSelect({ kind: "zone", id })}
+            onSelectPartition={(id) => handleSelect({ kind: "partition", id })}
+            onSelectPanel={(id) => handleSelect({ kind: "panel", id })}
           />
 
           <SkuPlacementLayer design={design} layout={layout} />
@@ -236,7 +287,7 @@ export function DesignStage({
               fixtures={activeFixtures}
               selection={selection}
               snapEnabled={snapEnabled}
-              onSelect={(id) => select({ kind: "fixture", id })}
+              onSelect={(id) => handleSelect({ kind: "fixture", id })}
               onMove={onMoveFixture}
             />
           )}
@@ -246,7 +297,7 @@ export function DesignStage({
               instances={furnitureInstances}
               selection={selection}
               snapEnabled={snapEnabled}
-              onSelect={(id) => select({ kind: "instance", id })}
+              onSelect={(id) => handleSelect({ kind: "instance", id })}
               onMove={onMoveFurniture}
               onRotate={onRotateFurniture}
               onDragPreview={setDragPreviewMm}
@@ -258,10 +309,20 @@ export function DesignStage({
             layout={layout}
             selection={selection}
             onSelectEdge={(edge) => {
-              select({ kind: "edge", id: edge.id });
-              onSelectEdge?.(edge);
+              handleSelect({ kind: "edge", id: edge.id });
+              if (!pickTarget) onSelectEdge?.(edge);
             }}
           />
+
+          {layerVisibility.constraints && (
+            <ConstraintLayer
+              constraints={design.constraints}
+              design={design}
+              activeSegmentId={activeSegmentNode.id}
+              selection={selection}
+              onSelect={(id) => handleSelect({ kind: "constraint", id })}
+            />
+          )}
 
           <MeasurementsLayer viewport={viewport} containerHeight={STAGE_HEIGHT} />
 

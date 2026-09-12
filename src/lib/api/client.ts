@@ -29,6 +29,7 @@ import type {
   FinalBomModel as FinalBom,
   FinalBomLineModel as FinalBomLine,
   FixtureModel as Fixture,
+  ConstraintModel as Constraint,
 } from "@/generated/prisma/models";
 import type { ValidationIssue } from "@/lib/types";
 import type { BomLineInput } from "@/lib/graph/bom";
@@ -75,9 +76,10 @@ export type FullDesign = Design & {
   validationResults: DesignValidationResult[];
   masterBoms: (MasterBom & { lines: unknown[] })[];
   fixtures: Fixture[];
+  constraints: Constraint[];
 };
 
-export type { Fixture, WallSegment, WallJunction };
+export type { Fixture, WallSegment, WallJunction, Constraint };
 
 export type FullProject = Project & {
   template: Design & { templateParameters: (TemplateParameter & { permission: ConsultantPermission | null })[] };
@@ -103,6 +105,11 @@ export type RelationshipOriginValue = "DESIGNER_DEFINED" | "CATALOG_DERIVED";
 export type LibraryRoomTypeValue = "LIVING_ROOM" | "TV_UNIT" | "BEDROOM";
 
 export type FixtureTypeValue = "TV" | "AC_UNIT" | "ELECTRICAL_SOCKET" | "WINDOW" | "DOOR";
+
+export type ConstraintTargetKindValue = "FIXTURE" | "PRODUCT_INSTANCE" | "GEOMETRY_NODE" | "GEOMETRY_EDGE";
+export type ConstraintTypeValue = "DISTANCE" | "ALIGN" | "EQUAL" | "MIN_MAX" | "CENTER" | "EDGE_TO_EDGE" | "FIXED_POSITION";
+export type ConstraintAxisValue = "X" | "Y";
+export type ConstraintTargetInput = { kind: ConstraintTargetKindValue; id: string };
 
 export const api = {
   listDesigns: () => request<Design[]>("GET", "/designs"),
@@ -390,4 +397,20 @@ export const api = {
   ) => request<Fixture>("PATCH", `/designs/${id}/fixtures/${fixtureId}`, data),
   deleteFixture: (id: string, fixtureId: string) =>
     request<void>("DELETE", `/designs/${id}/fixtures/${fixtureId}`),
+
+  listConstraints: (id: string) => request<Constraint[]>("GET", `/designs/${id}/constraints`),
+  createConstraint: (
+    id: string,
+    data: {
+      constraintType: ConstraintTypeValue;
+      targetA: ConstraintTargetInput;
+      targetB?: ConstraintTargetInput | null;
+      axis: ConstraintAxisValue;
+      valueMm?: number;
+      minValueMm?: number;
+      maxValueMm?: number;
+    },
+  ) => request<Constraint>("POST", `/designs/${id}/constraints`, data),
+  deleteConstraint: (id: string, constraintId: string) =>
+    request<void>("DELETE", `/designs/${id}/constraints/${constraintId}`),
 };

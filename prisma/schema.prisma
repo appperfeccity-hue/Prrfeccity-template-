@@ -114,6 +114,7 @@ model Design {
   projects                     Project[]
   fixtures                     Fixture[]
   wallJunctions                WallJunction[]
+  constraints                  Constraint[]
 
   @@index([rootTemplateId])
   @@index([status])
@@ -158,6 +159,8 @@ model GeometryNode {
   geometryProductRelationships        GeometryProductRelationship[]
   projectProductInstances             ProjectProductInstance[]
   projectGeometryProductRelationships ProjectGeometryProductRelationship[]
+  constraintTargetsA                  Constraint[]                         @relation("ConstraintTargetANode")
+  constraintTargetsB                  Constraint[]                         @relation("ConstraintTargetBNode")
 
   @@index([designId, nodeType])
 }
@@ -294,6 +297,8 @@ model GeometryEdge {
   geometryProductRelationships        GeometryProductRelationship[]
   templateParameters                  TemplateParameter[]
   projectGeometryProductRelationships ProjectGeometryProductRelationship[]
+  constraintTargetsA                  Constraint[]                         @relation("ConstraintTargetAEdge")
+  constraintTargetsB                  Constraint[]                         @relation("ConstraintTargetBEdge")
 
   @@index([designId, edgeRole])
   @@index([nodeId])
@@ -530,6 +535,8 @@ model ProductInstance {
   masterBomLinesDirect         MasterBomLine[]               @relation("BomLineFromInstance")
   templateParameters           TemplateParameter[]
   projectInstances             ProjectProductInstance[]
+  constraintTargetsA           Constraint[]                  @relation("ConstraintTargetAInstance")
+  constraintTargetsB           Constraint[]                  @relation("ConstraintTargetBInstance")
 
   @@index([designId, skuId])
 }
@@ -899,6 +906,99 @@ model Fixture {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
+  constraintTargetsA Constraint[] @relation("ConstraintTargetAFixture")
+  constraintTargetsB Constraint[] @relation("ConstraintTargetBFixture")
+
   @@index([designId])
   @@index([wallSegmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Constraint graph (validation-only -- see src/lib/graph/constraint.ts).
+// ---------------------------------------------------------------------------
+
+enum ConstraintTargetKind {
+  FIXTURE
+  PRODUCT_INSTANCE
+  GEOMETRY_NODE
+  GEOMETRY_EDGE
+}
+
+enum ConstraintAxis {
+  X
+  Y
+}
+
+// DISTANCE/ALIGN/MIN_MAX/CENTER/EDGE_TO_EDGE/FIXED_POSITION are positional;
+// EQUAL reuses this same axis field to mean "which dimension" (X ->
+// widthMm, Y -> heightMm) rather than adding a second near-duplicate field
+// -- see src/lib/graph/constraint.ts for exact per-type semantics.
+// PARALLEL/PERPENDICULAR are NOT modeled -- Fixture has no rotation field
+// at all, and ProductInstance.rotationDeg is only real for sku.rotatable
+// SKUs; a type that only half-covers the eligible endpoint kinds is
+// deliberately not built.
+enum ConstraintType {
+  DISTANCE
+  ALIGN
+  EQUAL
+  MIN_MAX
+  CENTER
+  EDGE_TO_EDGE
+  FIXED_POSITION
+}
+
+// A stored, declarative spatial fact between two freestanding entities (or
+// one freestanding entity and a fixed WALL-typed GeometryNode/GeometryEdge
+// anchor) -- see validation rule 20 (CONSTRAINT_SATISFIED), the ONLY thing
+// that ever reads this table. NEVER written to by any solver/auto-repair
+// logic -- "+ Solver" is explicitly out of scope this pass; a Constraint
+// row is a pure assertion, exactly like PARTITION_COVERAGE/PANEL_COVERAGE's
+// own after-the-fact mismatch reporting, never geometry that gets adjusted.
+//
+// Each endpoint is exactly one of Fixture / ProductInstance / a WALL-typed
+// GeometryNode / that WallSegment's own LEFT|RIGHT|TOP|BOTTOM boundary
+// GeometryEdge, enforced at the application layer (assertValidShape in
+// src/lib/graph/constraint.ts). GeometryNode/GeometryEdge targets are
+// scoped to WALL only -- Zone/Partition/Panel positions are DERIVED
+// (computeZoneLayout), never stored, and resolving them here would pull
+// that pure layout function into validation.ts, a coupling this pass does
+// not take on silently.
+//
+// targetB* columns are all null for the single-target FIXED_POSITION type;
+// required for every other ConstraintType.
+model Constraint {
+  id             String         @id @default(cuid())
+  designId       String
+  design         Design         @relation(fields: [designId], references: [id], onDelete: Cascade)
+  constraintType ConstraintType
+
+  targetAKind              ConstraintTargetKind
+  targetAFixtureId         String?
+  targetAFixture           Fixture?             @relation("ConstraintTargetAFixture", fields: [targetAFixtureId], references: [id], onDelete: Cascade)
+  targetAProductInstanceId String?
+  targetAProductInstance   ProductInstance?     @relation("ConstraintTargetAInstance", fields: [targetAProductInstanceId], references: [id], onDelete: Cascade)
+  targetAGeometryNodeId    String?
+  targetAGeometryNode      GeometryNode?        @relation("ConstraintTargetANode", fields: [targetAGeometryNodeId], references: [id], onDelete: Cascade)
+  targetAGeometryEdgeId    String?
+  targetAGeometryEdge      GeometryEdge?        @relation("ConstraintTargetAEdge", fields: [targetAGeometryEdgeId], references: [id], onDelete: Cascade)
+
+  targetBKind              ConstraintTargetKind?
+  targetBFixtureId         String?
+  targetBFixture           Fixture?              @relation("ConstraintTargetBFixture", fields: [targetBFixtureId], references: [id], onDelete: Cascade)
+  targetBProductInstanceId String?
+  targetBProductInstance   ProductInstance?      @relation("ConstraintTargetBInstance", fields: [targetBProductInstanceId], references: [id], onDelete: Cascade)
+  targetBGeometryNodeId    String?
+  targetBGeometryNode      GeometryNode?         @relation("ConstraintTargetBNode", fields: [targetBGeometryNodeId], references: [id], onDelete: Cascade)
+  targetBGeometryEdgeId    String?
+  targetBGeometryEdge      GeometryEdge?         @relation("ConstraintTargetBEdge", fields: [targetBGeometryEdgeId], references: [id], onDelete: Cascade)
+
+  axis       ConstraintAxis
+  // DISTANCE/EDGE_TO_EDGE/FIXED_POSITION's target value; null otherwise.
+  valueMm    Float?
+  // MIN_MAX's range; both null otherwise.
+  minValueMm Float?
+  maxValueMm Float?
+  createdAt  DateTime       @default(now())
+
+  @@index([designId])
 }

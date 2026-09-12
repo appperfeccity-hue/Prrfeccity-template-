@@ -252,6 +252,26 @@ export const createFixtureSchema = z.object({
 
 export const updateFixtureSchema = createFixtureSchema.partial();
 
+export const constraintTargetKinds = ["FIXTURE", "PRODUCT_INSTANCE", "GEOMETRY_NODE", "GEOMETRY_EDGE"] as const;
+export const constraintTypes = ["DISTANCE", "ALIGN", "EQUAL", "MIN_MAX", "CENTER", "EDGE_TO_EDGE", "FIXED_POSITION"] as const;
+export const constraintAxes = ["X", "Y"] as const;
+
+const constraintTargetSchema = z.object({ kind: z.enum(constraintTargetKinds), id: z.string() });
+
+export const createConstraintSchema = z
+  .object({
+    constraintType: z.enum(constraintTypes),
+    targetA: constraintTargetSchema,
+    targetB: constraintTargetSchema.nullable().optional(),
+    axis: z.enum(constraintAxes),
+    valueMm: z.number().optional(),
+    minValueMm: z.number().optional(),
+    maxValueMm: z.number().optional(),
+  })
+  .refine((v) => (v.constraintType === "FIXED_POSITION") === (v.targetB == null), {
+    message: "targetB is required for every ConstraintType except FIXED_POSITION",
+  });
+
 export type ValidationIssueSeverity = "ERROR" | "WARNING";
 
 export type ValidationIssue = {

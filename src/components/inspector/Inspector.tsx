@@ -35,6 +35,7 @@ export function Inspector({
   onDeletePartition,
   onUpdateFixture,
   onDeleteFixture,
+  onDeleteConstraint,
 }: {
   designId: string;
   design: FullDesign;
@@ -54,6 +55,7 @@ export function Inspector({
   onDeletePartition: (partitionId: string) => void;
   onUpdateFixture: (fixtureId: string, next: FixtureFields) => void;
   onDeleteFixture: (fixtureId: string) => void;
+  onDeleteConstraint: (constraintId: string) => void;
 }) {
   if (!selection) return null;
 
@@ -160,6 +162,21 @@ export function Inspector({
         isDraft={isDraft}
         onUpdateFixture={onUpdateFixture}
         onDeleteFixture={onDeleteFixture}
+        onClose={onClose}
+      />
+    );
+  }
+
+  if (selection.kind === "constraint") {
+    const constraint = design.constraints.find((c) => c.id === selection.id);
+    if (!constraint) return null;
+    return (
+      <ConstraintView
+        key={constraint.id}
+        design={design}
+        constraint={constraint}
+        isDraft={isDraft}
+        onDeleteConstraint={onDeleteConstraint}
         onClose={onClose}
       />
     );
@@ -590,6 +607,97 @@ function FixtureView({
         onDelete={() => {
           if (!confirm("Delete this fixture? This cannot be undone.")) return;
           onDeleteFixture(fixture.id);
+          onClose();
+        }}
+      />
+    </InspectorShell>
+  );
+}
+
+function resolveConstraintTargetLabel(
+  design: FullDesign,
+  kind: string | null,
+  fixtureId: string | null,
+  productInstanceId: string | null,
+  geometryNodeId: string | null,
+  geometryEdgeId: string | null,
+): string {
+  if (kind === "FIXTURE") {
+    const fx = design.fixtures.find((f) => f.id === fixtureId);
+    return fx ? `Fixture: ${fx.label ?? fx.fixtureType}` : "Fixture (deleted)";
+  }
+  if (kind === "PRODUCT_INSTANCE") {
+    const inst = design.productInstances.find((i) => i.id === productInstanceId);
+    return inst ? `Product: ${inst.sku?.code ?? "—"}` : "Product (deleted)";
+  }
+  if (kind === "GEOMETRY_NODE") {
+    const node = design.geometryNodes.find((n) => n.id === geometryNodeId);
+    return node?.wallSegment ? `Wall Segment ${node.wallSegment.sequence + 1}` : "Wall segment (deleted)";
+  }
+  if (kind === "GEOMETRY_EDGE") {
+    const edge = design.geometryNodes.flatMap((n) => n.edges).find((e) => e.id === geometryEdgeId);
+    return edge ? `Wall edge: ${edge.edgeRole}` : "Wall edge (deleted)";
+  }
+  return "—";
+}
+
+// Read-only except Delete -- there is no update endpoint (create/delete
+// only, per src/lib/graph/constraint.ts); "wrong constraint" is
+// delete-and-recreate, matching FixtureView's own type-is-read-only
+// precedent. "Last run" reads the most recently PERSISTED validation
+// result only (design.validationResults[0]), same as ConstraintLayer's own
+// coloring -- there is no live per-render recompute.
+function ConstraintView({
+  design,
+  constraint,
+  isDraft,
+  onDeleteConstraint,
+  onClose,
+}: {
+  design: FullDesign;
+  constraint: FullDesign["constraints"][number];
+  isDraft: boolean;
+  onDeleteConstraint: (constraintId: string) => void;
+  onClose: () => void;
+}) {
+  const targetALabel = resolveConstraintTargetLabel(
+    design,
+    constraint.targetAKind,
+    constraint.targetAFixtureId,
+    constraint.targetAProductInstanceId,
+    constraint.targetAGeometryNodeId,
+    constraint.targetAGeometryEdgeId,
+  );
+  const targetBLabel = constraint.targetBKind
+    ? resolveConstraintTargetLabel(
+        design,
+        constraint.targetBKind,
+        constraint.targetBFixtureId,
+        constraint.targetBProductInstanceId,
+        constraint.targetBGeometryNodeId,
+        constraint.targetBGeometryEdgeId,
+      )
+    : null;
+
+  const latestIssues = ((design.validationResults[0]?.issues as unknown as { code: string; refId?: string }[]) ?? []);
+  const hasRun = design.validationResults.length > 0;
+  const violated = latestIssues.some((i) => i.code === "CONSTRAINT_SATISFIED" && i.refId === constraint.id);
+  const lastRunStatus = !hasRun ? "Not yet validated" : violated ? "Violated" : "Satisfied";
+
+  return (
+    <InspectorShell title={`Constraint: ${constraint.constraintType}`} onClose={onClose}>
+      <Field label="Target A" value={targetALabel} />
+      {targetBLabel && <Field label="Target B" value={targetBLabel} />}
+      <Field label="Axis" value={constraint.axis} />
+      {constraint.valueMm != null && <Field label="Value" value={`${constraint.valueMm}mm`} />}
+      {constraint.minValueMm != null && <Field label="Min" value={`${constraint.minValueMm}mm`} />}
+      {constraint.maxValueMm != null && <Field label="Max" value={`${constraint.maxValueMm}mm`} />}
+      <Field label="Last run" value={lastRunStatus} />
+      <DeleteAction
+        disabled={!isDraft}
+        onDelete={() => {
+          if (!confirm("Delete this constraint? This cannot be undone.")) return;
+          onDeleteConstraint(constraint.id);
           onClose();
         }}
       />

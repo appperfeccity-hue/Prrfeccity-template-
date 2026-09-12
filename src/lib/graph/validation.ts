@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { ValidationIssue } from "@/lib/types";
 import { WIDTH_TOLERANCE_MM } from "@/lib/graph/constants";
+import { buildConstraintResolutionContext, checkConstraintSatisfied } from "@/lib/graph/constraint";
 
 const SPATIAL_ADJACENCY_TYPES = new Set(["ADJACENT_TO", "MEETS", "SHARES_BOUNDARY"]);
 
@@ -20,6 +21,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     productInstanceEdges,
     templateParameters,
     fixtures,
+    constraints,
   ] = await Promise.all([
     prisma.wallSegment.findMany({ where: { designId }, orderBy: { sequence: "asc" } }),
     prisma.wallJunction.findMany({ where: { designId } }),
@@ -46,6 +48,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     }),
     prisma.templateParameter.findMany({ where: { templateId: designId }, include: { permission: true } }),
     prisma.fixture.findMany({ where: { designId } }),
+    prisma.constraint.findMany({ where: { designId } }),
   ]);
 
   // Shared grouping used by rules 2 and 4 -- a wall segment's own ordered
@@ -518,6 +521,27 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
         message: "Wall junction angle must be between 0 and 360 degrees, exclusive",
         refType: "WallJunction",
         refId: junction.id,
+      });
+    }
+  }
+
+  // 20. CONSTRAINT_SATISFIED -- a Constraint is a stored, declarative fact
+  // (see Constraint model / src/lib/graph/constraint.ts); this rule is the
+  // ONLY code that ever reads it. Nothing writes back to a Fixture's or
+  // ProductInstance's geometry to satisfy one -- "+ Solver" is out of scope
+  // this pass. An unresolvable endpoint is flagged as a violation, not
+  // silently skipped -- a stored Constraint was explicitly authored, so
+  // becoming unevaluable is itself a real problem to report.
+  const constraintCtx = buildConstraintResolutionContext({ fixtures, productInstances, segments, edges });
+  for (const c of constraints) {
+    const result = checkConstraintSatisfied(c, constraintCtx);
+    if (!result.satisfied) {
+      issues.push({
+        code: "CONSTRAINT_SATISFIED",
+        severity: "ERROR",
+        message: result.reason ?? `${c.constraintType} constraint along ${c.axis} is not satisfied`,
+        refType: "Constraint",
+        refId: c.id,
       });
     }
   }

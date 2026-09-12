@@ -23,6 +23,7 @@ import { SkuPalette, type SkuDragPayload } from "@/components/palette/SkuPalette
 import { FurnitureCatalogue, type ArmedFurniture } from "@/components/palette/FurnitureCatalogue";
 import { FixturePalette, type ArmedFixture } from "@/components/palette/FixturePalette";
 import { ConstraintPalette, type ArmedConstraint, type ConstraintConfig } from "@/components/palette/ConstraintPalette";
+import { GeometryPrimitiveLineForm } from "@/components/palette/GeometryPrimitiveLineForm";
 import type { ConstraintTargetInput, ConstraintTypeValue } from "@/lib/api/client";
 
 const DROP_RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOUNDARY_OF", "POSITIONED_AT", "ADJACENT_TO"];
@@ -344,6 +345,27 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
     },
   });
 
+  const createGeometryPrimitiveLineMutation = useMutation({
+    mutationFn: (variables: { startXMm: number; startYMm: number; endXMm: number; endYMm: number; label?: string }) =>
+      api.createGeometryPrimitiveLine(id, variables),
+    onSuccess: (result, variables) => {
+      invalidate();
+      let currentId = result.id;
+      pushAction({
+        description: "Add line",
+        undo: async () => {
+          await api.deleteGeometryNode(id, currentId);
+          invalidate();
+        },
+        redo: async () => {
+          const r = await api.createGeometryPrimitiveLine(id, variables);
+          currentId = r.id;
+          invalidate();
+        },
+      });
+    },
+  });
+
   if (!design) return null;
 
   const findPanel = (panelId: string) => design.geometryNodes.find((n) => n.id === panelId)?.panel;
@@ -421,6 +443,10 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   const handleDeleteInstance = (instanceId: string) => api.deleteProductInstance(id, instanceId).then(invalidate);
   const handleDeleteFixture = (fixtureId: string) => api.deleteFixture(id, fixtureId).then(invalidate);
   const handleDeleteConstraint = (constraintId: string) => api.deleteConstraint(id, constraintId).then(invalidate);
+  // Reuses the existing generic deleteGeometryNode client method -- a
+  // GeometryPrimitiveLine shares its PK with a GeometryNode row, same as
+  // every other geometry subtype, so no dedicated delete endpoint exists.
+  const handleDeleteGeometryPrimitive = (nodeId: string) => api.deleteGeometryNode(id, nodeId).then(invalidate);
 
   // Advances the click-to-pick state machine as DesignStage forwards picked
   // canvas targets -- FIXED_POSITION has no target B, so target A resolves
@@ -536,6 +562,7 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
               onUpdateFixture={handleUpdateFixture}
               onDeleteFixture={(fixtureId) => handleDeleteFixture(fixtureId)}
               onDeleteConstraint={(constraintId) => handleDeleteConstraint(constraintId)}
+              onDeleteGeometryPrimitive={(nodeId) => handleDeleteGeometryPrimitive(nodeId)}
             />
           )}
           <FurnitureCatalogue
@@ -579,6 +606,15 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
             error={createConstraintMutation.isError ? (createConstraintMutation.error as Error).message : null}
           />
           <SkuPalette skus={nonFurnitureSkus} />
+          <GeometryPrimitiveLineForm
+            onCreate={(input) => createGeometryPrimitiveLineMutation.mutate(input)}
+            isPending={createGeometryPrimitiveLineMutation.isPending}
+            error={
+              createGeometryPrimitiveLineMutation.isError
+                ? (createGeometryPrimitiveLineMutation.error as Error).message
+                : null
+            }
+          />
         </div>
       </div>
 

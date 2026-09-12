@@ -4,7 +4,7 @@ import { reviseTemplate } from "@/lib/graph/revise";
 import { publishTemplate } from "@/lib/graph/publish";
 import { generateMasterBom } from "@/lib/graph/bom";
 import { runAndPersistValidation } from "@/lib/graph/validation";
-import { createWallSegment, addWallSegment, createZone, createPartition, createPanel, autoFillPartition } from "@/lib/graph/geometry";
+import { createWallSegment, addWallSegment, createZone, createPartition, createPanel, autoFillPartition, createGeometryPrimitiveLine } from "@/lib/graph/geometry";
 import { createProductInstance, createGeometryProductRelationship, createProductInstanceEdge } from "@/lib/graph/product";
 import { createFixture } from "@/lib/graph/fixture";
 import { createConstraint } from "@/lib/graph/constraint";
@@ -310,6 +310,18 @@ describe("reviseTemplate", () => {
       widthMm: 900,
       heightMm: 1200,
       clearanceMm: 50,
+    });
+
+    // Phase 6 item 1: Generalized Geometry System -- exercises the new
+    // revise.ts LINE copy loop (shares nodeIdMap with everything above) and
+    // snapshotSemanticState's new `primitives` entry. Not attached to
+    // anything else, so it can't affect the passed===true assertion below.
+    await createGeometryPrimitiveLine(design.id, {
+      startXMm: 0,
+      startYMm: 0,
+      endXMm: 500,
+      endYMm: 250,
+      label: "Reference line",
     });
 
     const { passed, issues } = await runAndPersistValidation(design.id);

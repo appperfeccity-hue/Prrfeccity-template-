@@ -23,6 +23,7 @@ import { MeasurementsLayer } from "@/components/canvas/layers/MeasurementsLayer"
 import { SelectionLayer } from "@/components/canvas/layers/SelectionLayer";
 import { GridOverlayLayer } from "@/components/canvas/layers/GridOverlayLayer";
 import { ConstraintLayer } from "@/components/canvas/layers/ConstraintLayer";
+import { GeometryPrimitiveLayer } from "@/components/canvas/layers/GeometryPrimitiveLayer";
 import type { CanvasSelectionItem } from "@/lib/canvas/store";
 
 export type DesignStageDropTarget =
@@ -45,6 +46,13 @@ function canvasItemToConstraintTarget(item: CanvasSelectionItem): ConstraintTarg
     case "zone":
     case "partition":
     case "panel":
+    // A geometry primitive also shares its PK with a GeometryNode row, so it
+    // converts the same way -- assertWallAnchor (src/lib/graph/constraint.ts)
+    // rejects it server-side with a 400, since Constraint anchors are scoped
+    // to WALL-owned GeometryNodes only this pass (see Phase 6 item 1's Key
+    // design decision #5: primitives are anchor-compatible in shape, but
+    // wiring assertWallAnchor -> assertAnchorableGeometry is deferred).
+    case "primitive":
       return { kind: "GEOMETRY_NODE", id: item.id };
     case "edge":
       return { kind: "GEOMETRY_EDGE", id: item.id };
@@ -77,8 +85,8 @@ const ZOOM_FACTOR = 1.1;
  * WallCanvas/ZoneCanvas/FurnitureCanvas used to do individually.
  *
  * Authoritative layer order: Grid, Wall, Zones, SKU placement, Lighting,
- * Fixture, Furniture, Trims, Constraint, Measurements, Selection, Grid
- * overlay. While `pickTarget` is set (a Constraint's target A/B is being
+ * Fixture, Furniture, Trims, Constraint, GeometryPrimitive, Measurements,
+ * Selection, Grid overlay. While `pickTarget` is set (a Constraint's target A/B is being
  * picked), every layer's onSelect (and onSelectEdge) callback resolves
  * through `handleSelect`, which routes to `pickTarget` instead of the canvas
  * store's own `select` -- see ConstraintLayer/ConstraintPalette for the
@@ -321,6 +329,14 @@ export function DesignStage({
               activeSegmentId={activeSegmentNode.id}
               selection={selection}
               onSelect={(id) => handleSelect({ kind: "constraint", id })}
+            />
+          )}
+
+          {layerVisibility.geometryPrimitives && (
+            <GeometryPrimitiveLayer
+              design={design}
+              selection={selection}
+              onSelect={(id) => handleSelect({ kind: "primitive", id })}
             />
           )}
 

@@ -6,6 +6,7 @@ const panel2: CanvasSelectionItem = { kind: "panel", id: "panel-2" };
 const instance1: CanvasSelectionItem = { kind: "instance", id: "inst-1" };
 const fixture1: CanvasSelectionItem = { kind: "fixture", id: "fixture-1" };
 const constraint1: CanvasSelectionItem = { kind: "constraint", id: "constraint-1" };
+const primitive1: CanvasSelectionItem = { kind: "primitive", id: "primitive-1" };
 
 describe("canvasReducer selection", () => {
   it("select() replaces the selection with a single item", () => {
@@ -63,6 +64,17 @@ describe("canvasReducer selection", () => {
     expect(state.selectedItems).toEqual([]);
     state = canvasReducer(state, { type: "addToSelection", item: constraint1 });
     expect(state.selectedItems).toEqual([constraint1]);
+    state = canvasReducer(state, { type: "clearSelection" });
+    expect(state.selectedItems).toEqual([]);
+  });
+
+  it("a 'primitive' selection kind behaves identically to every other kind -- the reducer needed no changes beyond the type union", () => {
+    let state = canvasReducer(initialCanvasState, { type: "select", selection: primitive1 });
+    expect(state.selectedItems).toEqual([primitive1]);
+    state = canvasReducer(state, { type: "toggleInSelection", item: primitive1 });
+    expect(state.selectedItems).toEqual([]);
+    state = canvasReducer(state, { type: "addToSelection", item: primitive1 });
+    expect(state.selectedItems).toEqual([primitive1]);
     state = canvasReducer(state, { type: "clearSelection" });
     expect(state.selectedItems).toEqual([]);
   });

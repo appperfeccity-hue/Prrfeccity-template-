@@ -30,6 +30,7 @@ import type {
   FinalBomLineModel as FinalBomLine,
   FixtureModel as Fixture,
   ConstraintModel as Constraint,
+  GeometryPrimitiveLineModel as GeometryPrimitiveLine,
 } from "@/generated/prisma/models";
 import type { ValidationIssue } from "@/lib/types";
 import type { BomLineInput } from "@/lib/graph/bom";
@@ -61,7 +62,7 @@ export type SkuWithCategory = SkuMaster & {
 };
 
 export type FullDesign = Design & {
-  geometryNodes: (GeometryNode & { wallSegment: WallSegment | null; zone: Zone | null; partition: ZonePartition | null; panel: Panel | null; edges: GeometryEdge[] })[];
+  geometryNodes: (GeometryNode & { wallSegment: WallSegment | null; zone: Zone | null; partition: ZonePartition | null; panel: Panel | null; primitiveLine: GeometryPrimitiveLine | null; edges: GeometryEdge[] })[];
   geometryEdgeRelationships: GeometryEdgeRelationship[];
   wallJunctions: WallJunction[];
   productInstances: (ProductInstance & {
@@ -413,4 +414,13 @@ export const api = {
   ) => request<Constraint>("POST", `/designs/${id}/constraints`, data),
   deleteConstraint: (id: string, constraintId: string) =>
     request<void>("DELETE", `/designs/${id}/constraints/${constraintId}`),
+
+  listGeometryPrimitiveLines: (id: string) =>
+    request<GeometryPrimitiveLine[]>("GET", `/designs/${id}/geometry-primitives/lines`),
+  createGeometryPrimitiveLine: (
+    id: string,
+    data: { startXMm: number; startYMm: number; endXMm: number; endYMm: number; label?: string },
+  ) => request<GeometryPrimitiveLine>("POST", `/designs/${id}/geometry-primitives/lines`, data),
+  // Deletion reuses the existing generic deleteGeometryNode route/client
+  // method above, unchanged.
 };

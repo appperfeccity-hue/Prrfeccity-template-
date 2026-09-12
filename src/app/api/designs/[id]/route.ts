@@ -17,7 +17,14 @@ export async function GET(
       where: { id },
       include: {
         geometryNodes: {
-          include: { wallSegment: true, zone: true, partition: true, panel: true, edges: true },
+          include: {
+            wallSegment: true,
+            zone: true,
+            partition: true,
+            panel: true,
+            primitiveLine: true,
+            edges: true,
+          },
         },
         geometryEdgeRelationships: true,
         wallJunctions: true,

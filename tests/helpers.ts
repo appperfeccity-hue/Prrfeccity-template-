@@ -420,7 +420,7 @@ export async function buildPublishedProjectTemplateFixture(
  * structural position, which is always unique.
  */
 export async function snapshotSemanticState(designId: string) {
-  const [segments, junctions, zones, partitions, panels, edges, edgeRelationships, instances, instanceEdges, geoProductRels, params, fixtures, constraints] =
+  const [segments, junctions, zones, partitions, panels, edges, edgeRelationships, instances, instanceEdges, geoProductRels, params, fixtures, constraints, primitiveLines] =
     await Promise.all([
       prisma.wallSegment.findMany({ where: { designId }, orderBy: { sequence: "asc" } }),
       prisma.wallJunction.findMany({ where: { designId } }),
@@ -438,6 +438,7 @@ export async function snapshotSemanticState(designId: string) {
       prisma.templateParameter.findMany({ where: { templateId: designId }, include: { permission: true } }),
       prisma.fixture.findMany({ where: { designId } }),
       prisma.constraint.findMany({ where: { designId } }),
+      prisma.geometryPrimitiveLine.findMany({ where: { designId } }),
     ]);
 
   const segmentSequence = (segmentId: string | null): number | null => {
@@ -665,6 +666,18 @@ export async function snapshotSemanticState(designId: string) {
           maxValueMm: c.maxValueMm,
         };
       })
+      .sort((a, b) => a.key.localeCompare(b.key)),
+    // Phase 6 item 1: Generalized Geometry System -- value-based key (a
+    // primitive has no natural structural key, same reasoning as Fixture's
+    // own key above), exercises the new revise.ts LINE copy loop.
+    primitives: primitiveLines
+      .map((line) => ({
+        key: `primitive:LINE:${line.startXMm},${line.startYMm}-${line.endXMm},${line.endYMm}`,
+        startXMm: line.startXMm,
+        startYMm: line.startYMm,
+        endXMm: line.endXMm,
+        endYMm: line.endYMm,
+      }))
       .sort((a, b) => a.key.localeCompare(b.key)),
   };
 }

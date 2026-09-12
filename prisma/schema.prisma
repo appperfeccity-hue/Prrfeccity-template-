@@ -141,19 +141,41 @@ enum GeometryNodeType {
   ZONE
   PARTITION
   PANEL
+  PRIMITIVE
+}
+
+// RECTANGLE is a standalone shape primitive -- NOT an alias for or
+// replacement of WallSegment/Zone/ZonePartition/Panel, which carry real
+// domain semantics (containment FKs, orderIndex, coverage validation) that
+// a generic shape deliberately does not have. See Phase 6 item 1's Key
+// design decisions in the plan file.
+enum GeometryPrimitiveKind {
+  RECTANGLE
+  LINE
+  POLYLINE
+  ARC
+  CIRCLE
 }
 
 model GeometryNode {
-  id       String           @id @default(cuid())
-  designId String
-  design   Design           @relation(fields: [designId], references: [id], onDelete: Cascade)
-  nodeType GeometryNodeType
-  label    String?
+  id            String                 @id @default(cuid())
+  designId      String
+  design        Design                 @relation(fields: [designId], references: [id], onDelete: Cascade)
+  nodeType      GeometryNodeType
+  // Non-null iff nodeType === PRIMITIVE; null for WALL/ZONE/PARTITION/PANEL
+  // forever.
+  primitiveKind GeometryPrimitiveKind?
+  label         String?
 
   wallSegment                         WallSegment?
   zone                                Zone?
   partition                           ZonePartition?
   panel                               Panel?
+  primitiveRectangle                  GeometryPrimitiveRectangle?
+  primitiveLine                       GeometryPrimitiveLine?
+  primitivePolyline                   GeometryPrimitivePolyline?
+  primitiveArc                        GeometryPrimitiveArc?
+  primitiveCircle                     GeometryPrimitiveCircle?
   edges                               GeometryEdge[]
   productInstances                    ProductInstance[]
   geometryProductRelationships        GeometryProductRelationship[]
@@ -163,6 +185,92 @@ model GeometryNode {
   constraintTargetsB                  Constraint[]                         @relation("ConstraintTargetBNode")
 
   @@index([designId, nodeType])
+  @@index([designId, primitiveKind])
+}
+
+// Standalone axis-aligned rectangle. Schema-only this pass -- no domain
+// function, API route, or renderer exists yet; a future feature (e.g. an
+// Installation Area boundary) builds those when it needs a rectangular
+// boundary that is NOT a Wall/Zone/Partition/Panel's containment-tree
+// member.
+model GeometryPrimitiveRectangle {
+  id          String       @id
+  node        GeometryNode @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId    String
+  xMm         Float
+  yMm         Float
+  widthMm     Float
+  heightMm    Float
+  rotationDeg Float        @default(0)
+}
+
+// The one primitive kind with a full domain-function/API/rendering
+// build-out this pass. Fixed 2-endpoint cardinality stored as 4 inline
+// columns (no child table needed, unlike POLYLINE's N points).
+model GeometryPrimitiveLine {
+  id       String       @id
+  node     GeometryNode @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId String
+  startXMm Float
+  startYMm Float
+  endXMm   Float
+  endYMm   Float
+}
+
+// Schema-only this pass. `closed` distinguishes an open polyline (a path)
+// from a closed one (a boundary/polygon) -- a future Installation Area
+// pass would likely set closed=true.
+model GeometryPrimitivePolyline {
+  id       String                           @id
+  node     GeometryNode                     @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId String
+  closed   Boolean                          @default(false)
+  points   GeometryPrimitivePolylinePoint[]
+}
+
+// Ordered via a real sequenceIndex column, matching this app's existing
+// ZonePartition/Panel orderIndex precedent over a JSON point array -- gives
+// per-point referential integrity and queryability a JSON array would
+// lose. `bulge` is the DXF-convention bulge factor: 0 = straight segment to
+// the next point (by sequenceIndex), nonzero = a circular-arc bulge between
+// this point and the next, letting one polyline mix straight and curved
+// segments without a second table.
+model GeometryPrimitivePolylinePoint {
+  id            String                    @id @default(cuid())
+  polylineId    String
+  polyline      GeometryPrimitivePolyline @relation(fields: [polylineId], references: [id], onDelete: Cascade)
+  sequenceIndex Int
+  xMm           Float
+  yMm           Float
+  bulge         Float                     @default(0)
+
+  @@unique([polylineId, sequenceIndex])
+}
+
+// Schema-only this pass. sweepAngleDeg is signed (positive = clockwise in
+// screen space) to match Konva's own Arc `angle` convention directly, so a
+// future renderer needs no runtime conversion.
+model GeometryPrimitiveArc {
+  id            String       @id
+  node          GeometryNode @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId      String
+  centerXMm     Float
+  centerYMm     Float
+  radiusMm      Float
+  startAngleDeg Float
+  sweepAngleDeg Float
+}
+
+// Schema-only this pass. Deliberately its own table, not an ARC with
+// sweepAngleDeg=360 -- avoids nullable/meaningless angle columns on a shape
+// that has no start/end.
+model GeometryPrimitiveCircle {
+  id        String       @id
+  node      GeometryNode @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId  String
+  centerXMm Float
+  centerYMm Float
+  radiusMm  Float
 }
 
 // Renamed from `Wall` (WallType enum + cornerAngleDeg removed -- see

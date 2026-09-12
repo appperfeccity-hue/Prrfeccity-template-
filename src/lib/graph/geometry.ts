@@ -312,6 +312,42 @@ export async function deleteGeometryNode(nodeId: string) {
   await prisma.geometryNode.delete({ where: { id: nodeId } });
 }
 
+// The one geometry-primitive kind with a full domain-function/API/rendering
+// build-out this pass (Phase 6 item 1) -- see the plan file for why LINE was
+// chosen as the reference implementation. Follows the same shared-PK
+// transaction shape as createWallSegment/createZone/createPanelTx, minus the
+// bulk GeometryEdge.createMany call those make -- primitives get no edges
+// this pass. Deletion reuses the existing generic deleteGeometryNode above
+// unchanged; no new delete function is needed.
+export async function createGeometryPrimitiveLine(
+  designId: string,
+  input: { startXMm: number; startYMm: number; endXMm: number; endYMm: number; label?: string },
+) {
+  return prisma.$transaction(async (tx: Tx) => {
+    const id = randomUUID();
+    await tx.geometryNode.create({
+      data: {
+        id,
+        designId,
+        nodeType: "PRIMITIVE" as GeometryNodeType,
+        primitiveKind: "LINE",
+        label: input.label ?? null,
+      },
+    });
+    const line = await tx.geometryPrimitiveLine.create({
+      data: {
+        id,
+        designId,
+        startXMm: input.startXMm,
+        startYMm: input.startYMm,
+        endXMm: input.endXMm,
+        endYMm: input.endYMm,
+      },
+    });
+    return line;
+  });
+}
+
 export async function createGeometryEdgeRelationship(
   designId: string,
   input: { edgeAId: string; edgeBId: string; relationshipType: GeometryEdgeRelationshipType },

@@ -36,6 +36,7 @@ export function Inspector({
   onUpdateFixture,
   onDeleteFixture,
   onDeleteConstraint,
+  onDeleteGeometryPrimitive,
 }: {
   designId: string;
   design: FullDesign;
@@ -56,6 +57,7 @@ export function Inspector({
   onUpdateFixture: (fixtureId: string, next: FixtureFields) => void;
   onDeleteFixture: (fixtureId: string) => void;
   onDeleteConstraint: (constraintId: string) => void;
+  onDeleteGeometryPrimitive: (nodeId: string) => void;
 }) {
   if (!selection) return null;
 
@@ -177,6 +179,19 @@ export function Inspector({
         constraint={constraint}
         isDraft={isDraft}
         onDeleteConstraint={onDeleteConstraint}
+        onClose={onClose}
+      />
+    );
+  }
+
+  if (selection.kind === "primitive" && node?.primitiveLine) {
+    return (
+      <GeometryPrimitiveLineView
+        key={node.id}
+        node={node}
+        line={node.primitiveLine}
+        isDraft={isDraft}
+        onDeleteGeometryPrimitive={onDeleteGeometryPrimitive}
         onClose={onClose}
       />
     );
@@ -607,6 +622,41 @@ function FixtureView({
         onDelete={() => {
           if (!confirm("Delete this fixture? This cannot be undone.")) return;
           onDeleteFixture(fixture.id);
+          onClose();
+        }}
+      />
+    </InspectorShell>
+  );
+}
+
+// Phase 6 item 1: Generalized Geometry System -- read-only except Delete,
+// matching FixtureView/ConstraintView's own type-is-read-only precedent:
+// there is no update endpoint for a GeometryPrimitiveLine, only create/
+// delete (delete reuses the generic geometry-node delete route).
+function GeometryPrimitiveLineView({
+  node,
+  line,
+  isDraft,
+  onDeleteGeometryPrimitive,
+  onClose,
+}: {
+  node: FullDesign["geometryNodes"][number];
+  line: NonNullable<FullDesign["geometryNodes"][number]["primitiveLine"]>;
+  isDraft: boolean;
+  onDeleteGeometryPrimitive: (nodeId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <InspectorShell title={node.label ?? "Line"} onClose={onClose}>
+      <Field label="Type" value="LINE" />
+      <Field label="Start (mm)" value={`${line.startXMm}, ${line.startYMm}`} />
+      <Field label="End (mm)" value={`${line.endXMm}, ${line.endYMm}`} />
+
+      <DeleteAction
+        disabled={!isDraft}
+        onDelete={() => {
+          if (!confirm("Delete this line? This cannot be undone.")) return;
+          onDeleteGeometryPrimitive(node.id);
           onClose();
         }}
       />

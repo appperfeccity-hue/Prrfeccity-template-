@@ -137,6 +137,33 @@ export async function reviseTemplate(templateId: string) {
       });
     }
 
+    // Phase 6 item 1: Generalized Geometry System -- LINE is the one
+    // primitive kind with a domain function this pass, so it is the only
+    // one that can ever have rows to copy; shares the same nodeIdMap every
+    // other geometry-type loop populates (every downstream consumer loop
+    // below is already agnostic to which producer populated a given id).
+    const primitiveLines = await tx.geometryPrimitiveLine.findMany({
+      where: { designId: templateId },
+      include: { node: true },
+    });
+    for (const line of primitiveLines) {
+      const newId = randomUUID();
+      nodeIdMap.set(line.id, newId);
+      await tx.geometryNode.create({
+        data: { id: newId, designId: child.id, nodeType: "PRIMITIVE", primitiveKind: "LINE", label: line.node.label },
+      });
+      await tx.geometryPrimitiveLine.create({
+        data: {
+          id: newId,
+          designId: child.id,
+          startXMm: line.startXMm,
+          startYMm: line.startYMm,
+          endXMm: line.endXMm,
+          endYMm: line.endYMm,
+        },
+      });
+    }
+
     const edges = await tx.geometryEdge.findMany({ where: { designId: templateId } });
     for (const edge of edges) {
       const newId = randomUUID();

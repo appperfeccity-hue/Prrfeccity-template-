@@ -272,6 +272,17 @@ export const createConstraintSchema = z
     message: "targetB is required for every ConstraintType except FIXED_POSITION",
   });
 
+// Phase 6 item 1: Generalized Geometry System -- LINE is the one primitive
+// kind with a full domain-function/API/rendering build-out this pass.
+// RECTANGLE/POLYLINE/ARC/CIRCLE stay schema-only, no zod schema yet.
+export const createGeometryPrimitiveLineSchema = z.object({
+  startXMm: z.number(),
+  startYMm: z.number(),
+  endXMm: z.number(),
+  endYMm: z.number(),
+  label: z.string().optional(),
+});
+
 export type ValidationIssueSeverity = "ERROR" | "WARNING";
 
 export type ValidationIssue = {

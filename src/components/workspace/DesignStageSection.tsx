@@ -23,7 +23,7 @@ import { SkuPalette, type SkuDragPayload } from "@/components/palette/SkuPalette
 import { FurnitureCatalogue, type ArmedFurniture } from "@/components/palette/FurnitureCatalogue";
 import { FixturePalette, type ArmedFixture } from "@/components/palette/FixturePalette";
 import { ConstraintPalette, type ArmedConstraint, type ConstraintConfig } from "@/components/palette/ConstraintPalette";
-import { GeometryPrimitiveLineForm } from "@/components/palette/GeometryPrimitiveLineForm";
+import { GeometryPrimitivePalette } from "@/components/palette/GeometryPrimitivePalette";
 import type { ConstraintTargetInput, ConstraintTypeValue } from "@/lib/api/client";
 
 const DROP_RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOUNDARY_OF", "POSITIONED_AT", "ADJACENT_TO"];
@@ -366,6 +366,102 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
     },
   });
 
+  const createGeometryPrimitiveRectangleMutation = useMutation({
+    mutationFn: (variables: {
+      xMm: number;
+      yMm: number;
+      widthMm: number;
+      heightMm: number;
+      rotationDeg?: number;
+      label?: string;
+    }) => api.createGeometryPrimitiveRectangle(id, variables),
+    onSuccess: (result, variables) => {
+      invalidate();
+      let currentId = result.id;
+      pushAction({
+        description: "Add rectangle",
+        undo: async () => {
+          await api.deleteGeometryNode(id, currentId);
+          invalidate();
+        },
+        redo: async () => {
+          const r = await api.createGeometryPrimitiveRectangle(id, variables);
+          currentId = r.id;
+          invalidate();
+        },
+      });
+    },
+  });
+
+  const createGeometryPrimitivePolylineMutation = useMutation({
+    mutationFn: (variables: { points: { xMm: number; yMm: number; bulge?: number }[]; closed?: boolean; label?: string }) =>
+      api.createGeometryPrimitivePolyline(id, variables),
+    onSuccess: (result, variables) => {
+      invalidate();
+      let currentId = result.id;
+      pushAction({
+        description: "Add polyline",
+        undo: async () => {
+          await api.deleteGeometryNode(id, currentId);
+          invalidate();
+        },
+        redo: async () => {
+          const r = await api.createGeometryPrimitivePolyline(id, variables);
+          currentId = r.id;
+          invalidate();
+        },
+      });
+    },
+  });
+
+  const createGeometryPrimitiveArcMutation = useMutation({
+    mutationFn: (variables: {
+      centerXMm: number;
+      centerYMm: number;
+      radiusMm: number;
+      startAngleDeg: number;
+      sweepAngleDeg: number;
+      label?: string;
+    }) => api.createGeometryPrimitiveArc(id, variables),
+    onSuccess: (result, variables) => {
+      invalidate();
+      let currentId = result.id;
+      pushAction({
+        description: "Add arc",
+        undo: async () => {
+          await api.deleteGeometryNode(id, currentId);
+          invalidate();
+        },
+        redo: async () => {
+          const r = await api.createGeometryPrimitiveArc(id, variables);
+          currentId = r.id;
+          invalidate();
+        },
+      });
+    },
+  });
+
+  const createGeometryPrimitiveCircleMutation = useMutation({
+    mutationFn: (variables: { centerXMm: number; centerYMm: number; radiusMm: number; label?: string }) =>
+      api.createGeometryPrimitiveCircle(id, variables),
+    onSuccess: (result, variables) => {
+      invalidate();
+      let currentId = result.id;
+      pushAction({
+        description: "Add circle",
+        undo: async () => {
+          await api.deleteGeometryNode(id, currentId);
+          invalidate();
+        },
+        redo: async () => {
+          const r = await api.createGeometryPrimitiveCircle(id, variables);
+          currentId = r.id;
+          invalidate();
+        },
+      });
+    },
+  });
+
   if (!design) return null;
 
   const findPanel = (panelId: string) => design.geometryNodes.find((n) => n.id === panelId)?.panel;
@@ -606,13 +702,26 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
             error={createConstraintMutation.isError ? (createConstraintMutation.error as Error).message : null}
           />
           <SkuPalette skus={nonFurnitureSkus} />
-          <GeometryPrimitiveLineForm
-            onCreate={(input) => createGeometryPrimitiveLineMutation.mutate(input)}
-            isPending={createGeometryPrimitiveLineMutation.isPending}
+          <GeometryPrimitivePalette
+            onCreateRectangle={(input) => createGeometryPrimitiveRectangleMutation.mutate(input)}
+            onCreateLine={(input) => createGeometryPrimitiveLineMutation.mutate(input)}
+            onCreatePolyline={(input) => createGeometryPrimitivePolylineMutation.mutate(input)}
+            onCreateArc={(input) => createGeometryPrimitiveArcMutation.mutate(input)}
+            onCreateCircle={(input) => createGeometryPrimitiveCircleMutation.mutate(input)}
+            isPending={
+              createGeometryPrimitiveRectangleMutation.isPending ||
+              createGeometryPrimitiveLineMutation.isPending ||
+              createGeometryPrimitivePolylineMutation.isPending ||
+              createGeometryPrimitiveArcMutation.isPending ||
+              createGeometryPrimitiveCircleMutation.isPending
+            }
             error={
-              createGeometryPrimitiveLineMutation.isError
-                ? (createGeometryPrimitiveLineMutation.error as Error).message
-                : null
+              (createGeometryPrimitiveRectangleMutation.isError && (createGeometryPrimitiveRectangleMutation.error as Error).message) ||
+              (createGeometryPrimitiveLineMutation.isError && (createGeometryPrimitiveLineMutation.error as Error).message) ||
+              (createGeometryPrimitivePolylineMutation.isError && (createGeometryPrimitivePolylineMutation.error as Error).message) ||
+              (createGeometryPrimitiveArcMutation.isError && (createGeometryPrimitiveArcMutation.error as Error).message) ||
+              (createGeometryPrimitiveCircleMutation.isError && (createGeometryPrimitiveCircleMutation.error as Error).message) ||
+              null
             }
           />
         </div>

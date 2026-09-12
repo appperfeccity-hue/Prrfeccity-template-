@@ -184,12 +184,15 @@ export function Inspector({
     );
   }
 
-  if (selection.kind === "primitive" && node?.primitiveLine) {
+  if (
+    selection.kind === "primitive" &&
+    node &&
+    (node.primitiveRectangle || node.primitiveLine || node.primitivePolyline || node.primitiveArc || node.primitiveCircle)
+  ) {
     return (
-      <GeometryPrimitiveLineView
+      <GeometryPrimitiveView
         key={node.id}
         node={node}
-        line={node.primitiveLine}
         isDraft={isDraft}
         onDeleteGeometryPrimitive={onDeleteGeometryPrimitive}
         onClose={onClose}
@@ -629,33 +632,88 @@ function FixtureView({
   );
 }
 
-// Phase 6 item 1: Generalized Geometry System -- read-only except Delete,
-// matching FixtureView/ConstraintView's own type-is-read-only precedent:
-// there is no update endpoint for a GeometryPrimitiveLine, only create/
-// delete (delete reuses the generic geometry-node delete route).
-function GeometryPrimitiveLineView({
+// Generalized Geometry System (Phase 6 items 1-2) -- read-only except
+// Delete, matching FixtureView/ConstraintView's own type-is-read-only
+// precedent: there is no update endpoint for any primitive kind, only
+// create/delete (delete reuses the generic geometry-node delete route).
+// One consolidated view (rather than 5 near-duplicate per-kind components)
+// since every kind's view is just a Type row + 2-4 read-only Field rows +
+// DeleteAction, with no per-kind interactive logic.
+function GeometryPrimitiveView({
   node,
-  line,
   isDraft,
   onDeleteGeometryPrimitive,
   onClose,
 }: {
   node: FullDesign["geometryNodes"][number];
-  line: NonNullable<FullDesign["geometryNodes"][number]["primitiveLine"]>;
   isDraft: boolean;
   onDeleteGeometryPrimitive: (nodeId: string) => void;
   onClose: () => void;
 }) {
+  const view = (() => {
+    if (node.primitiveRectangle) {
+      const r = node.primitiveRectangle;
+      return {
+        type: "RECTANGLE",
+        rows: [
+          { label: "Position (mm)", value: `${r.xMm}, ${r.yMm}` },
+          { label: "Size (mm)", value: `${r.widthMm} x ${r.heightMm}` },
+          { label: "Rotation", value: `${r.rotationDeg} deg` },
+        ],
+      };
+    }
+    if (node.primitiveLine) {
+      const l = node.primitiveLine;
+      return {
+        type: "LINE",
+        rows: [
+          { label: "Start (mm)", value: `${l.startXMm}, ${l.startYMm}` },
+          { label: "End (mm)", value: `${l.endXMm}, ${l.endYMm}` },
+        ],
+      };
+    }
+    if (node.primitivePolyline) {
+      const p = node.primitivePolyline;
+      return {
+        type: "POLYLINE",
+        rows: [
+          { label: "Points", value: `${p.points.length}` },
+          { label: "Closed", value: p.closed ? "Yes" : "No" },
+        ],
+      };
+    }
+    if (node.primitiveArc) {
+      const a = node.primitiveArc;
+      return {
+        type: "ARC",
+        rows: [
+          { label: "Center (mm)", value: `${a.centerXMm}, ${a.centerYMm}` },
+          { label: "Radius (mm)", value: `${a.radiusMm}` },
+          { label: "Start / Sweep", value: `${a.startAngleDeg} deg / ${a.sweepAngleDeg} deg` },
+        ],
+      };
+    }
+    const c = node.primitiveCircle!;
+    return {
+      type: "CIRCLE",
+      rows: [
+        { label: "Center (mm)", value: `${c.centerXMm}, ${c.centerYMm}` },
+        { label: "Radius (mm)", value: `${c.radiusMm}` },
+      ],
+    };
+  })();
+
   return (
-    <InspectorShell title={node.label ?? "Line"} onClose={onClose}>
-      <Field label="Type" value="LINE" />
-      <Field label="Start (mm)" value={`${line.startXMm}, ${line.startYMm}`} />
-      <Field label="End (mm)" value={`${line.endXMm}, ${line.endYMm}`} />
+    <InspectorShell title={node.label ?? view.type} onClose={onClose}>
+      <Field label="Type" value={view.type} />
+      {view.rows.map((row) => (
+        <Field key={row.label} label={row.label} value={row.value} />
+      ))}
 
       <DeleteAction
         disabled={!isDraft}
         onDelete={() => {
-          if (!confirm("Delete this line? This cannot be undone.")) return;
+          if (!confirm(`Delete this ${view.type.toLowerCase()}? This cannot be undone.`)) return;
           onDeleteGeometryPrimitive(node.id);
           onClose();
         }}

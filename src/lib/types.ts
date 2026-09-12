@@ -272,14 +272,51 @@ export const createConstraintSchema = z
     message: "targetB is required for every ConstraintType except FIXED_POSITION",
   });
 
-// Phase 6 item 1: Generalized Geometry System -- LINE is the one primitive
-// kind with a full domain-function/API/rendering build-out this pass.
-// RECTANGLE/POLYLINE/ARC/CIRCLE stay schema-only, no zod schema yet.
+// Generalized Geometry System (Phase 6 items 1-2): LINE was the reference
+// vertical slice, now extended to all 5 GeometryPrimitiveKind values.
 export const createGeometryPrimitiveLineSchema = z.object({
   startXMm: z.number(),
   startYMm: z.number(),
   endXMm: z.number(),
   endYMm: z.number(),
+  label: z.string().optional(),
+});
+
+export const createGeometryPrimitiveRectangleSchema = z.object({
+  xMm: z.number(),
+  yMm: z.number(),
+  widthMm: z.number().positive(),
+  heightMm: z.number().positive(),
+  rotationDeg: z.number().optional(),
+  label: z.string().optional(),
+});
+
+export const createGeometryPrimitivePolylineSchema = z.object({
+  points: z
+    .array(z.object({ xMm: z.number(), yMm: z.number(), bulge: z.number().optional() }))
+    .min(2, "A polyline requires at least 2 points"),
+  closed: z.boolean().optional(),
+  label: z.string().optional(),
+});
+
+// startAngleDeg/sweepAngleDeg are deliberately unconstrained -- no
+// ~90°-tolerance-style rule applies here (unlike WallJunction.angleDeg);
+// sweepAngleDeg's sign already matches Konva Arc's own `angle` prop
+// convention by design (see the schema's own comment), no runtime
+// conversion needed.
+export const createGeometryPrimitiveArcSchema = z.object({
+  centerXMm: z.number(),
+  centerYMm: z.number(),
+  radiusMm: z.number().positive(),
+  startAngleDeg: z.number(),
+  sweepAngleDeg: z.number(),
+  label: z.string().optional(),
+});
+
+export const createGeometryPrimitiveCircleSchema = z.object({
+  centerXMm: z.number(),
+  centerYMm: z.number(),
+  radiusMm: z.number().positive(),
   label: z.string().optional(),
 });
 

@@ -4,7 +4,19 @@ import { reviseTemplate } from "@/lib/graph/revise";
 import { publishTemplate } from "@/lib/graph/publish";
 import { generateMasterBom } from "@/lib/graph/bom";
 import { runAndPersistValidation } from "@/lib/graph/validation";
-import { createWallSegment, addWallSegment, createZone, createPartition, createPanel, autoFillPartition, createGeometryPrimitiveLine } from "@/lib/graph/geometry";
+import {
+  createWallSegment,
+  addWallSegment,
+  createZone,
+  createPartition,
+  createPanel,
+  autoFillPartition,
+  createGeometryPrimitiveLine,
+  createGeometryPrimitiveRectangle,
+  createGeometryPrimitivePolyline,
+  createGeometryPrimitiveArc,
+  createGeometryPrimitiveCircle,
+} from "@/lib/graph/geometry";
 import { createProductInstance, createGeometryProductRelationship, createProductInstanceEdge } from "@/lib/graph/product";
 import { createFixture } from "@/lib/graph/fixture";
 import { createConstraint } from "@/lib/graph/constraint";
@@ -312,16 +324,48 @@ describe("reviseTemplate", () => {
       clearanceMm: 50,
     });
 
-    // Phase 6 item 1: Generalized Geometry System -- exercises the new
-    // revise.ts LINE copy loop (shares nodeIdMap with everything above) and
-    // snapshotSemanticState's new `primitives` entry. Not attached to
-    // anything else, so it can't affect the passed===true assertion below.
+    // Generalized Geometry System (Phase 6 items 1-2) -- exercises every
+    // revise.ts primitive copy loop (all share nodeIdMap with everything
+    // above) and snapshotSemanticState's combined `primitives` entry. None
+    // of these are attached to anything else, so none affect the
+    // passed===true assertion below.
     await createGeometryPrimitiveLine(design.id, {
       startXMm: 0,
       startYMm: 0,
       endXMm: 500,
       endYMm: 250,
       label: "Reference line",
+    });
+    await createGeometryPrimitiveRectangle(design.id, {
+      xMm: 100,
+      yMm: 100,
+      widthMm: 200,
+      heightMm: 150,
+      rotationDeg: 30,
+      label: "Reference rectangle",
+    });
+    await createGeometryPrimitivePolyline(design.id, {
+      points: [
+        { xMm: 0, yMm: 0 },
+        { xMm: 300, yMm: 0, bulge: 0.25 },
+        { xMm: 300, yMm: 300 },
+      ],
+      closed: true,
+      label: "Reference polyline",
+    });
+    await createGeometryPrimitiveArc(design.id, {
+      centerXMm: 400,
+      centerYMm: 400,
+      radiusMm: 150,
+      startAngleDeg: 10,
+      sweepAngleDeg: 120,
+      label: "Reference arc",
+    });
+    await createGeometryPrimitiveCircle(design.id, {
+      centerXMm: 600,
+      centerYMm: 600,
+      radiusMm: 80,
+      label: "Reference circle",
     });
 
     const { passed, issues } = await runAndPersistValidation(design.id);

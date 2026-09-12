@@ -31,6 +31,11 @@ import type {
   FixtureModel as Fixture,
   ConstraintModel as Constraint,
   GeometryPrimitiveLineModel as GeometryPrimitiveLine,
+  GeometryPrimitiveRectangleModel as GeometryPrimitiveRectangle,
+  GeometryPrimitivePolylineModel as GeometryPrimitivePolyline,
+  GeometryPrimitivePolylinePointModel as GeometryPrimitivePolylinePoint,
+  GeometryPrimitiveArcModel as GeometryPrimitiveArc,
+  GeometryPrimitiveCircleModel as GeometryPrimitiveCircle,
 } from "@/generated/prisma/models";
 import type { ValidationIssue } from "@/lib/types";
 import type { BomLineInput } from "@/lib/graph/bom";
@@ -62,7 +67,18 @@ export type SkuWithCategory = SkuMaster & {
 };
 
 export type FullDesign = Design & {
-  geometryNodes: (GeometryNode & { wallSegment: WallSegment | null; zone: Zone | null; partition: ZonePartition | null; panel: Panel | null; primitiveLine: GeometryPrimitiveLine | null; edges: GeometryEdge[] })[];
+  geometryNodes: (GeometryNode & {
+    wallSegment: WallSegment | null;
+    zone: Zone | null;
+    partition: ZonePartition | null;
+    panel: Panel | null;
+    primitiveRectangle: GeometryPrimitiveRectangle | null;
+    primitiveLine: GeometryPrimitiveLine | null;
+    primitivePolyline: (GeometryPrimitivePolyline & { points: GeometryPrimitivePolylinePoint[] }) | null;
+    primitiveArc: GeometryPrimitiveArc | null;
+    primitiveCircle: GeometryPrimitiveCircle | null;
+    edges: GeometryEdge[];
+  })[];
   geometryEdgeRelationships: GeometryEdgeRelationship[];
   wallJunctions: WallJunction[];
   productInstances: (ProductInstance & {
@@ -421,6 +437,49 @@ export const api = {
     id: string,
     data: { startXMm: number; startYMm: number; endXMm: number; endYMm: number; label?: string },
   ) => request<GeometryPrimitiveLine>("POST", `/designs/${id}/geometry-primitives/lines`, data),
-  // Deletion reuses the existing generic deleteGeometryNode route/client
-  // method above, unchanged.
+
+  listGeometryPrimitiveRectangles: (id: string) =>
+    request<GeometryPrimitiveRectangle[]>("GET", `/designs/${id}/geometry-primitives/rectangles`),
+  createGeometryPrimitiveRectangle: (
+    id: string,
+    data: { xMm: number; yMm: number; widthMm: number; heightMm: number; rotationDeg?: number; label?: string },
+  ) => request<GeometryPrimitiveRectangle>("POST", `/designs/${id}/geometry-primitives/rectangles`, data),
+
+  listGeometryPrimitivePolylines: (id: string) =>
+    request<(GeometryPrimitivePolyline & { points: GeometryPrimitivePolylinePoint[] })[]>(
+      "GET",
+      `/designs/${id}/geometry-primitives/polylines`,
+    ),
+  createGeometryPrimitivePolyline: (
+    id: string,
+    data: { points: { xMm: number; yMm: number; bulge?: number }[]; closed?: boolean; label?: string },
+  ) =>
+    request<GeometryPrimitivePolyline & { points: GeometryPrimitivePolylinePoint[] }>(
+      "POST",
+      `/designs/${id}/geometry-primitives/polylines`,
+      data,
+    ),
+
+  listGeometryPrimitiveArcs: (id: string) =>
+    request<GeometryPrimitiveArc[]>("GET", `/designs/${id}/geometry-primitives/arcs`),
+  createGeometryPrimitiveArc: (
+    id: string,
+    data: {
+      centerXMm: number;
+      centerYMm: number;
+      radiusMm: number;
+      startAngleDeg: number;
+      sweepAngleDeg: number;
+      label?: string;
+    },
+  ) => request<GeometryPrimitiveArc>("POST", `/designs/${id}/geometry-primitives/arcs`, data),
+
+  listGeometryPrimitiveCircles: (id: string) =>
+    request<GeometryPrimitiveCircle[]>("GET", `/designs/${id}/geometry-primitives/circles`),
+  createGeometryPrimitiveCircle: (
+    id: string,
+    data: { centerXMm: number; centerYMm: number; radiusMm: number; label?: string },
+  ) => request<GeometryPrimitiveCircle>("POST", `/designs/${id}/geometry-primitives/circles`, data),
+  // Deletion for every primitive kind reuses the existing generic
+  // deleteGeometryNode route/client method above, unchanged.
 };

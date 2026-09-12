@@ -420,7 +420,11 @@ export async function buildPublishedProjectTemplateFixture(
  * structural position, which is always unique.
  */
 export async function snapshotSemanticState(designId: string) {
-  const [segments, junctions, zones, partitions, panels, edges, edgeRelationships, instances, instanceEdges, geoProductRels, params, fixtures, constraints, primitiveLines] =
+  const [
+    segments, junctions, zones, partitions, panels, edges, edgeRelationships, instances,
+    instanceEdges, geoProductRels, params, fixtures, constraints, primitiveLines,
+    primitiveRectangles, primitivePolylines, primitiveArcs, primitiveCircles,
+  ] =
     await Promise.all([
       prisma.wallSegment.findMany({ where: { designId }, orderBy: { sequence: "asc" } }),
       prisma.wallJunction.findMany({ where: { designId } }),
@@ -439,6 +443,13 @@ export async function snapshotSemanticState(designId: string) {
       prisma.fixture.findMany({ where: { designId } }),
       prisma.constraint.findMany({ where: { designId } }),
       prisma.geometryPrimitiveLine.findMany({ where: { designId } }),
+      prisma.geometryPrimitiveRectangle.findMany({ where: { designId } }),
+      prisma.geometryPrimitivePolyline.findMany({
+        where: { designId },
+        include: { points: { orderBy: { sequenceIndex: "asc" } } },
+      }),
+      prisma.geometryPrimitiveArc.findMany({ where: { designId } }),
+      prisma.geometryPrimitiveCircle.findMany({ where: { designId } }),
     ]);
 
   const segmentSequence = (segmentId: string | null): number | null => {
@@ -667,17 +678,45 @@ export async function snapshotSemanticState(designId: string) {
         };
       })
       .sort((a, b) => a.key.localeCompare(b.key)),
-    // Phase 6 item 1: Generalized Geometry System -- value-based key (a
+    // Generalized Geometry System (Phase 6 items 1-2) -- value-based keys (a
     // primitive has no natural structural key, same reasoning as Fixture's
-    // own key above), exercises the new revise.ts LINE copy loop.
-    primitives: primitiveLines
-      .map((line) => ({
-        key: `primitive:LINE:${line.startXMm},${line.startYMm}-${line.endXMm},${line.endYMm}`,
-        startXMm: line.startXMm,
-        startYMm: line.startYMm,
-        endXMm: line.endXMm,
-        endYMm: line.endYMm,
-      }))
-      .sort((a, b) => a.key.localeCompare(b.key)),
+    // own key above), combined across all 5 kinds into one sorted array,
+    // exercising every revise.ts primitive copy loop.
+    primitives: byKey([
+      ...primitiveLines.map((l) => ({
+        key: `primitive:LINE:${l.startXMm},${l.startYMm}-${l.endXMm},${l.endYMm}`,
+        startXMm: l.startXMm,
+        startYMm: l.startYMm,
+        endXMm: l.endXMm,
+        endYMm: l.endYMm,
+      })),
+      ...primitiveRectangles.map((r) => ({
+        key: `primitive:RECTANGLE:${r.xMm},${r.yMm},${r.widthMm},${r.heightMm},${r.rotationDeg}`,
+        xMm: r.xMm,
+        yMm: r.yMm,
+        widthMm: r.widthMm,
+        heightMm: r.heightMm,
+        rotationDeg: r.rotationDeg,
+      })),
+      ...primitivePolylines.map((p) => ({
+        key: `primitive:POLYLINE:closed=${p.closed}:[${p.points.map((pt) => `${pt.xMm},${pt.yMm},${pt.bulge}`).join(";")}]`,
+        closed: p.closed,
+        points: p.points.map((pt) => ({ xMm: pt.xMm, yMm: pt.yMm, bulge: pt.bulge })),
+      })),
+      ...primitiveArcs.map((a) => ({
+        key: `primitive:ARC:${a.centerXMm},${a.centerYMm},${a.radiusMm},${a.startAngleDeg},${a.sweepAngleDeg}`,
+        centerXMm: a.centerXMm,
+        centerYMm: a.centerYMm,
+        radiusMm: a.radiusMm,
+        startAngleDeg: a.startAngleDeg,
+        sweepAngleDeg: a.sweepAngleDeg,
+      })),
+      ...primitiveCircles.map((c) => ({
+        key: `primitive:CIRCLE:${c.centerXMm},${c.centerYMm},${c.radiusMm}`,
+        centerXMm: c.centerXMm,
+        centerYMm: c.centerYMm,
+        radiusMm: c.radiusMm,
+      })),
+    ]),
   };
 }

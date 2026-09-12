@@ -137,11 +137,34 @@ export async function reviseTemplate(templateId: string) {
       });
     }
 
-    // Phase 6 item 1: Generalized Geometry System -- LINE is the one
-    // primitive kind with a domain function this pass, so it is the only
-    // one that can ever have rows to copy; shares the same nodeIdMap every
-    // other geometry-type loop populates (every downstream consumer loop
-    // below is already agnostic to which producer populated a given id).
+    // Generalized Geometry System (Phase 6 items 1-2) -- all 5 primitive
+    // kinds' copy loops, grouped here, in enum declaration order; each
+    // shares the same nodeIdMap every other geometry-type loop populates
+    // (every downstream consumer loop below is already agnostic to which
+    // producer populated a given id).
+    const primitiveRectangles = await tx.geometryPrimitiveRectangle.findMany({
+      where: { designId: templateId },
+      include: { node: true },
+    });
+    for (const rect of primitiveRectangles) {
+      const newId = randomUUID();
+      nodeIdMap.set(rect.id, newId);
+      await tx.geometryNode.create({
+        data: { id: newId, designId: child.id, nodeType: "PRIMITIVE", primitiveKind: "RECTANGLE", label: rect.node.label },
+      });
+      await tx.geometryPrimitiveRectangle.create({
+        data: {
+          id: newId,
+          designId: child.id,
+          xMm: rect.xMm,
+          yMm: rect.yMm,
+          widthMm: rect.widthMm,
+          heightMm: rect.heightMm,
+          rotationDeg: rect.rotationDeg,
+        },
+      });
+    }
+
     const primitiveLines = await tx.geometryPrimitiveLine.findMany({
       where: { designId: templateId },
       include: { node: true },
@@ -160,6 +183,79 @@ export async function reviseTemplate(templateId: string) {
           startYMm: line.startYMm,
           endXMm: line.endXMm,
           endYMm: line.endYMm,
+        },
+      });
+    }
+
+    // Points need no id-remap map of their own -- nothing else in the
+    // schema references a polyline point by id, so fresh child rows with
+    // the copied sequenceIndex/xMm/yMm/bulge are sufficient.
+    const primitivePolylines = await tx.geometryPrimitivePolyline.findMany({
+      where: { designId: templateId },
+      include: { node: true, points: { orderBy: { sequenceIndex: "asc" } } },
+    });
+    for (const polyline of primitivePolylines) {
+      const newId = randomUUID();
+      nodeIdMap.set(polyline.id, newId);
+      await tx.geometryNode.create({
+        data: { id: newId, designId: child.id, nodeType: "PRIMITIVE", primitiveKind: "POLYLINE", label: polyline.node.label },
+      });
+      await tx.geometryPrimitivePolyline.create({
+        data: { id: newId, designId: child.id, closed: polyline.closed },
+      });
+      if (polyline.points.length > 0) {
+        await tx.geometryPrimitivePolylinePoint.createMany({
+          data: polyline.points.map((pt) => ({
+            polylineId: newId,
+            sequenceIndex: pt.sequenceIndex,
+            xMm: pt.xMm,
+            yMm: pt.yMm,
+            bulge: pt.bulge,
+          })),
+        });
+      }
+    }
+
+    const primitiveArcs = await tx.geometryPrimitiveArc.findMany({
+      where: { designId: templateId },
+      include: { node: true },
+    });
+    for (const arc of primitiveArcs) {
+      const newId = randomUUID();
+      nodeIdMap.set(arc.id, newId);
+      await tx.geometryNode.create({
+        data: { id: newId, designId: child.id, nodeType: "PRIMITIVE", primitiveKind: "ARC", label: arc.node.label },
+      });
+      await tx.geometryPrimitiveArc.create({
+        data: {
+          id: newId,
+          designId: child.id,
+          centerXMm: arc.centerXMm,
+          centerYMm: arc.centerYMm,
+          radiusMm: arc.radiusMm,
+          startAngleDeg: arc.startAngleDeg,
+          sweepAngleDeg: arc.sweepAngleDeg,
+        },
+      });
+    }
+
+    const primitiveCircles = await tx.geometryPrimitiveCircle.findMany({
+      where: { designId: templateId },
+      include: { node: true },
+    });
+    for (const circle of primitiveCircles) {
+      const newId = randomUUID();
+      nodeIdMap.set(circle.id, newId);
+      await tx.geometryNode.create({
+        data: { id: newId, designId: child.id, nodeType: "PRIMITIVE", primitiveKind: "CIRCLE", label: circle.node.label },
+      });
+      await tx.geometryPrimitiveCircle.create({
+        data: {
+          id: newId,
+          designId: child.id,
+          centerXMm: circle.centerXMm,
+          centerYMm: circle.centerYMm,
+          radiusMm: circle.radiusMm,
         },
       });
     }

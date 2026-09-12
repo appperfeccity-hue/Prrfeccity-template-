@@ -348,6 +348,134 @@ export async function createGeometryPrimitiveLine(
   });
 }
 
+// Phase 6 item 2: extends the vertical slice LINE established to the
+// remaining 4 primitive kinds -- same shared-PK transaction shape, no
+// GeometryEdge rows, deletion still reuses the generic deleteGeometryNode
+// above.
+export async function createGeometryPrimitiveRectangle(
+  designId: string,
+  input: { xMm: number; yMm: number; widthMm: number; heightMm: number; rotationDeg?: number; label?: string },
+) {
+  return prisma.$transaction(async (tx: Tx) => {
+    const id = randomUUID();
+    await tx.geometryNode.create({
+      data: {
+        id,
+        designId,
+        nodeType: "PRIMITIVE" as GeometryNodeType,
+        primitiveKind: "RECTANGLE",
+        label: input.label ?? null,
+      },
+    });
+    return tx.geometryPrimitiveRectangle.create({
+      data: {
+        id,
+        designId,
+        xMm: input.xMm,
+        yMm: input.yMm,
+        widthMm: input.widthMm,
+        heightMm: input.heightMm,
+        rotationDeg: input.rotationDeg ?? 0,
+      },
+    });
+  });
+}
+
+// >=2 points enforced here too (not just zod) since tests/geometry-primitive.test.ts
+// exercises this function directly, bypassing API-layer validation entirely.
+export async function createGeometryPrimitivePolyline(
+  designId: string,
+  input: { points: { xMm: number; yMm: number; bulge?: number }[]; closed?: boolean; label?: string },
+) {
+  if (input.points.length < 2) throw badRequest("A polyline requires at least 2 points");
+  return prisma.$transaction(async (tx: Tx) => {
+    const id = randomUUID();
+    await tx.geometryNode.create({
+      data: {
+        id,
+        designId,
+        nodeType: "PRIMITIVE" as GeometryNodeType,
+        primitiveKind: "POLYLINE",
+        label: input.label ?? null,
+      },
+    });
+    const polyline = await tx.geometryPrimitivePolyline.create({
+      data: { id, designId, closed: input.closed ?? false },
+    });
+    await tx.geometryPrimitivePolylinePoint.createMany({
+      data: input.points.map((p, index) => ({
+        polylineId: id,
+        sequenceIndex: index,
+        xMm: p.xMm,
+        yMm: p.yMm,
+        bulge: p.bulge ?? 0,
+      })),
+    });
+    const points = await tx.geometryPrimitivePolylinePoint.findMany({
+      where: { polylineId: id },
+      orderBy: { sequenceIndex: "asc" },
+    });
+    return { ...polyline, points };
+  });
+}
+
+export async function createGeometryPrimitiveArc(
+  designId: string,
+  input: {
+    centerXMm: number;
+    centerYMm: number;
+    radiusMm: number;
+    startAngleDeg: number;
+    sweepAngleDeg: number;
+    label?: string;
+  },
+) {
+  return prisma.$transaction(async (tx: Tx) => {
+    const id = randomUUID();
+    await tx.geometryNode.create({
+      data: {
+        id,
+        designId,
+        nodeType: "PRIMITIVE" as GeometryNodeType,
+        primitiveKind: "ARC",
+        label: input.label ?? null,
+      },
+    });
+    return tx.geometryPrimitiveArc.create({
+      data: {
+        id,
+        designId,
+        centerXMm: input.centerXMm,
+        centerYMm: input.centerYMm,
+        radiusMm: input.radiusMm,
+        startAngleDeg: input.startAngleDeg,
+        sweepAngleDeg: input.sweepAngleDeg,
+      },
+    });
+  });
+}
+
+export async function createGeometryPrimitiveCircle(
+  designId: string,
+  input: { centerXMm: number; centerYMm: number; radiusMm: number; label?: string },
+) {
+  return prisma.$transaction(async (tx: Tx) => {
+    const id = randomUUID();
+    await tx.geometryNode.create({
+      data: {
+        id,
+        designId,
+        nodeType: "PRIMITIVE" as GeometryNodeType,
+        primitiveKind: "CIRCLE",
+        label: input.label ?? null,
+      },
+    });
+    return tx.geometryPrimitiveCircle.create({
+      data: { id, designId, centerXMm: input.centerXMm, centerYMm: input.centerYMm, radiusMm: input.radiusMm },
+    });
+  });
+}
+
 export async function createGeometryEdgeRelationship(
   designId: string,
   input: { edgeAId: string; edgeBId: string; relationshipType: GeometryEdgeRelationshipType },

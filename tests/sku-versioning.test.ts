@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { updateSkuMaster, discontinueSkuMaster, assertSkuNotDiscontinued } from "@/lib/graph/sku";
 import { createProductInstance } from "@/lib/graph/product";
-import { autoFillPartition, createWall, createZone, createPartition } from "@/lib/graph/geometry";
+import { autoFillPartition, createWallSegment, createZone, createPartition } from "@/lib/graph/geometry";
 import { computeMasterBomLines, generateMasterBom } from "@/lib/graph/bom";
 import { runAndPersistValidation } from "@/lib/graph/validation";
 import { buildValidTemplateFixture, deleteFixtureDesign } from "./helpers";
@@ -165,9 +165,9 @@ describe("Discontinuation", () => {
 
     const design = await prisma.design.create({ data: { name: "Discontinued Autofill Fixture" } });
     designIdToCleanUp = design.id;
-    const { wall } = await createWall(design.id, { wallType: "STRAIGHT_LTR", lengthMm: 1200, heightMm: 2400 });
+    const { segment } = await createWallSegment(design.id, { lengthMm: 1200, heightMm: 2400 });
     const { zone } = await createZone(design.id, {
-      wallId: wall.id,
+      wallSegmentId: segment.id,
       associatesWith: "WALL",
       orderIndex: 0,
       widthMm: 1200,

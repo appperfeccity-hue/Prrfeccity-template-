@@ -113,6 +113,7 @@ model Design {
   masterBoms                   MasterBom[]
   projects                     Project[]
   fixtures                     Fixture[]
+  wallJunctions                WallJunction[]
 
   @@index([rootTemplateId])
   @@index([status])
@@ -148,7 +149,7 @@ model GeometryNode {
   nodeType GeometryNodeType
   label    String?
 
-  wall                                Wall?
+  wallSegment                         WallSegment?
   zone                                Zone?
   partition                           ZonePartition?
   panel                               Panel?
@@ -161,22 +162,54 @@ model GeometryNode {
   @@index([designId, nodeType])
 }
 
-enum WallType {
-  STRAIGHT_LTR
-  STRAIGHT_RTL
-  L_TYPE
+// Renamed from `Wall` (WallType enum + cornerAngleDeg removed -- see
+// WallJunction.angleDeg for the replacement). Still a GeometryNode subtype
+// (nodeType stays "WALL" -- it only discriminates "this node is
+// wall-shaped", true for every segment). `sequence` orders 0..N-1
+// consecutive segments within one design; WallJunction rows connect
+// consecutive segments. This pass enforces at most 2 segments / 1 junction
+// at the APPLICATION layer only (MAX_WALL_SEGMENTS_PER_DESIGN,
+// src/lib/graph/constants.ts) -- never a DB constraint -- so a future
+// N-segment pass only needs to raise that constant, never a second
+// migration for this shape.
+model WallSegment {
+  id       String       @id
+  node     GeometryNode @relation(fields: [id], references: [id], onDelete: Cascade)
+  designId String
+  sequence Int
+  lengthMm Float
+  heightMm Float
+
+  zones            Zone[]
+  fixtures         Fixture[]
+  productInstances ProductInstance[]
+  junctionsAsA     WallJunction[]    @relation("JunctionSegmentA")
+  junctionsAsB     WallJunction[]    @relation("JunctionSegmentB")
+
+  @@unique([designId, sequence])
 }
 
-model Wall {
-  id             String       @id
-  node           GeometryNode @relation(fields: [id], references: [id], onDelete: Cascade)
-  designId       String
-  wallType       WallType
-  lengthMm       Float
-  heightMm       Float
-  cornerAngleDeg Float?
+// A physical corner joining two consecutive WallSegments. Capped at exactly
+// one per design this pass (see MAX_WALL_SEGMENTS_PER_DESIGN). angleDeg is a
+// first-class typed field (not GeometryEdge.metadata Json) because it is
+// meant to drive future trim/connector-selection rules by corner angle --
+// unlike the removed Wall.cornerAngleDeg, there is no ~90-degree constraint:
+// any physically real corner angle in the open interval (0, 360) is valid.
+// No rendering geometry derives from this row this pass -- pure data plus a
+// future extension point.
+model WallJunction {
+  id         String      @id @default(cuid())
+  designId   String
+  design     Design      @relation(fields: [designId], references: [id], onDelete: Cascade)
+  segmentAId String
+  segmentA   WallSegment @relation("JunctionSegmentA", fields: [segmentAId], references: [id], onDelete: Cascade)
+  segmentBId String
+  segmentB   WallSegment @relation("JunctionSegmentB", fields: [segmentBId], references: [id], onDelete: Cascade)
+  angleDeg   Float
+  createdAt  DateTime    @default(now())
 
-  zones Zone[]
+  @@unique([segmentAId, segmentBId])
+  @@index([designId])
 }
 
 enum ZoneAssociation {
@@ -188,8 +221,8 @@ model Zone {
   id              String          @id
   node            GeometryNode    @relation(fields: [id], references: [id], onDelete: Cascade)
   designId        String
-  wallId          String?
-  wall            Wall?           @relation(fields: [wallId], references: [id])
+  wallSegmentId   String?
+  wallSegment     WallSegment?    @relation(fields: [wallSegmentId], references: [id])
   associatesWith  ZoneAssociation
   orderIndex      Int
   widthMm         Float
@@ -468,6 +501,12 @@ model ProductInstance {
   sku            SkuMaster     @relation(fields: [skuId], references: [id])
   geometryNodeId String?
   geometryNode   GeometryNode? @relation(fields: [geometryNodeId], references: [id])
+  // Which WallSegment's local mm frame x/y/z are measured in -- resolved at
+  // creation time via resolveWallSegmentId (auto-defaulted to the design's
+  // sole segment when unambiguous; required once 2 segments exist). Nullable
+  // at the DB level (mirrors Zone.wallSegmentId's own convention).
+  wallSegmentId  String?
+  wallSegment    WallSegment?  @relation(fields: [wallSegmentId], references: [id])
   x              Float?
   y              Float?
   z              Float?
@@ -839,21 +878,27 @@ enum FixtureType {
 // other geometry entity ((0,0) at the wall's top-left); no depth/z axis is
 // modeled.
 model Fixture {
-  id          String      @id @default(cuid())
-  designId    String
-  design      Design      @relation(fields: [designId], references: [id], onDelete: Cascade)
-  fixtureType FixtureType
-  label       String?
-  xMm         Float
-  yMm         Float
-  widthMm     Float
-  heightMm    Float
+  id            String       @id @default(cuid())
+  designId      String
+  design        Design       @relation(fields: [designId], references: [id], onDelete: Cascade)
+  fixtureType   FixtureType
+  label         String?
+  // Which WallSegment's local mm frame xMm/yMm are measured in -- resolved
+  // at creation time via resolveWallSegmentId (see ProductInstance's own
+  // identical field for the same rationale).
+  wallSegmentId String?
+  wallSegment   WallSegment? @relation(fields: [wallSegmentId], references: [id])
+  xMm           Float
+  yMm           Float
+  widthMm       Float
+  heightMm      Float
   // Required clearance beyond the fixture's own box, in mm, applied
   // uniformly on all four sides. Defaults to 0 -- "no clearance
   // requirement" until the Designer explicitly sets one.
-  clearanceMm Float       @default(0)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  clearanceMm   Float        @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   @@index([designId])
+  @@index([wallSegmentId])
 }

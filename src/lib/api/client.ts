@@ -18,7 +18,8 @@ import type {
   SkuMasterModel as SkuMaster,
   TemplateParameterModel as TemplateParameter,
   ConsultantPermissionModel as ConsultantPermission,
-  WallModel as Wall,
+  WallSegmentModel as WallSegment,
+  WallJunctionModel as WallJunction,
   ZoneModel as Zone,
   ZonePartitionModel as ZonePartition,
   ProjectModel as Project,
@@ -59,8 +60,9 @@ export type SkuWithCategory = SkuMaster & {
 };
 
 export type FullDesign = Design & {
-  geometryNodes: (GeometryNode & { wall: Wall | null; zone: Zone | null; partition: ZonePartition | null; panel: Panel | null; edges: GeometryEdge[] })[];
+  geometryNodes: (GeometryNode & { wallSegment: WallSegment | null; zone: Zone | null; partition: ZonePartition | null; panel: Panel | null; edges: GeometryEdge[] })[];
   geometryEdgeRelationships: GeometryEdgeRelationship[];
+  wallJunctions: WallJunction[];
   productInstances: (ProductInstance & {
     sku: SkuWithCategory;
     designOption: FurnitureDesignOption | null;
@@ -75,7 +77,7 @@ export type FullDesign = Design & {
   fixtures: Fixture[];
 };
 
-export type { Fixture };
+export type { Fixture, WallSegment, WallJunction };
 
 export type FullProject = Project & {
   template: Design & { templateParameters: (TemplateParameter & { permission: ConsultantPermission | null })[] };
@@ -119,16 +121,26 @@ export const api = {
   ) => request<Design>("PATCH", `/designs/${id}`, data),
   reviseDesign: (id: string) => request<Design>("POST", `/designs/${id}/revise`),
 
-  setWall: (
-    id: string,
-    data: { wallType: string; lengthMm: number; heightMm: number; cornerAngleDeg?: number },
-  ) => request<{ wall: Wall; edges: GeometryEdge[] }>("PUT", `/designs/${id}/wall`, data),
+  createWallSegment: (id: string, data: { lengthMm: number; heightMm: number }) =>
+    request<{ segment: WallSegment; edges: GeometryEdge[] }>("PUT", `/designs/${id}/wall-segments/first`, data),
+
+  addWallSegment: (id: string, data: { lengthMm: number; heightMm: number; angleDeg: number }) =>
+    request<{ segment: WallSegment; edges: GeometryEdge[] }>("POST", `/designs/${id}/wall-segments/second`, data),
+
+  updateWallSegment: (id: string, segmentId: string, data: { lengthMm?: number; heightMm?: number }) =>
+    request<WallSegment>("PATCH", `/designs/${id}/wall-segments/${segmentId}`, data),
+
+  deleteWallSegment: (id: string, segmentId: string) =>
+    request<void>("DELETE", `/designs/${id}/wall-segments/${segmentId}`),
+
+  updateWallJunction: (id: string, junctionId: string, data: { angleDeg: number }) =>
+    request<WallJunction>("PATCH", `/designs/${id}/wall-junctions/${junctionId}`, data),
 
   listZones: (id: string) => request<Zone[]>("GET", `/designs/${id}/zones`),
   createZone: (
     id: string,
     data: {
-      wallId?: string;
+      wallSegmentId: string;
       associatesWith: string;
       orderIndex: number;
       widthMm: number;
@@ -216,6 +228,7 @@ export const api = {
     data: {
       skuId: string;
       geometryNodeId?: string;
+      wallSegmentId?: string;
       x?: number;
       y?: number;
       z?: number;
@@ -231,6 +244,7 @@ export const api = {
     id: string,
     instanceId: string,
     data: {
+      wallSegmentId?: string;
       x?: number;
       y?: number;
       z?: number;
@@ -352,6 +366,7 @@ export const api = {
     data: {
       fixtureType: FixtureTypeValue;
       label?: string;
+      wallSegmentId?: string;
       xMm: number;
       yMm: number;
       widthMm: number;
@@ -365,6 +380,7 @@ export const api = {
     data: Partial<{
       fixtureType: FixtureTypeValue;
       label: string | null;
+      wallSegmentId: string | null;
       xMm: number;
       yMm: number;
       widthMm: number;

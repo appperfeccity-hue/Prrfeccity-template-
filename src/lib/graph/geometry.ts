@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { badRequest, notFound } from "@/lib/api/errors";
-import { WIDTH_TOLERANCE_MM } from "@/lib/graph/constants";
+import { MAX_WALL_SEGMENTS_PER_DESIGN, WIDTH_TOLERANCE_MM } from "@/lib/graph/constants";
 import { assertSkuNotDiscontinued } from "@/lib/graph/sku";
 import type {
   GeometryEdgeRelationshipType,
@@ -10,54 +10,46 @@ import type {
   PanelOrientation,
   Prisma,
   ProductInstance,
-  WallType,
   ZoneAssociation,
 } from "@/generated/prisma/client";
 
 type Tx = Prisma.TransactionClient;
 
-export const MAX_ZONES_PER_DESIGN = 3;
+export const MAX_ZONES_PER_SEGMENT = 3;
 
-export async function createWall(
+// Creates-or-replaces the design's first (sequence 0) wall segment -- same
+// delete-and-recreate-via-GeometryNode-cascade shape as the old single-wall
+// createWall. Rejected if a second segment already exists: replacing the
+// anchor segment out from under an existing junction would silently
+// invalidate the junction's meaning. The Designer must delete segment 2
+// first (which cascades its junction, see deleteWallSegment).
+export async function createWallSegment(
   designId: string,
-  input: {
-    wallType: WallType;
-    lengthMm: number;
-    heightMm: number;
-    cornerAngleDeg?: number | null;
-  },
+  input: { lengthMm: number; heightMm: number },
 ) {
   return prisma.$transaction(async (tx: Tx) => {
-    const existing = await tx.wall.findFirst({ where: { designId } });
+    const hasSecond = await tx.wallSegment.count({ where: { designId, sequence: 1 } });
+    if (hasSecond > 0) {
+      throw badRequest("Delete the second wall segment before replacing the first");
+    }
+
+    const existing = await tx.wallSegment.findUnique({
+      where: { designId_sequence: { designId, sequence: 0 } },
+    });
     if (existing) {
       await tx.geometryNode.delete({ where: { id: existing.id } });
     }
 
     const id = randomUUID();
     await tx.geometryNode.create({
-      data: { id, designId, nodeType: "WALL" as GeometryNodeType, label: "Wall" },
+      data: { id, designId, nodeType: "WALL" as GeometryNodeType, label: "Wall Segment 1" },
     });
-    const wall = await tx.wall.create({
-      data: {
-        id,
-        designId,
-        wallType: input.wallType,
-        lengthMm: input.lengthMm,
-        heightMm: input.heightMm,
-        cornerAngleDeg: input.cornerAngleDeg ?? null,
-      },
+    const segment = await tx.wallSegment.create({
+      data: { id, designId, sequence: 0, lengthMm: input.lengthMm, heightMm: input.heightMm },
     });
-
-    const edgeRoles: Array<"LEFT" | "RIGHT" | "TOP" | "BOTTOM" | "CORNER"> = [
-      "LEFT",
-      "RIGHT",
-      "TOP",
-      "BOTTOM",
-    ];
-    if (input.wallType === "L_TYPE") edgeRoles.push("CORNER");
 
     await tx.geometryEdge.createMany({
-      data: edgeRoles.map((edgeRole) => ({
+      data: (["LEFT", "RIGHT", "TOP", "BOTTOM"] as const).map((edgeRole) => ({
         designId,
         nodeId: id,
         edgeRole,
@@ -65,14 +57,114 @@ export async function createWall(
     });
 
     const edges = await tx.geometryEdge.findMany({ where: { nodeId: id } });
-    return { wall, edges };
+    return { segment, edges };
   });
+}
+
+// Appends the design's second segment PLUS the junction connecting it to
+// segment 0, in one call -- a junction is meaningless without both
+// endpoints, so there is no valid intermediate state where segment 2 exists
+// with no junction.
+export async function addWallSegment(
+  designId: string,
+  input: { lengthMm: number; heightMm: number; angleDeg: number },
+) {
+  return prisma.$transaction(async (tx: Tx) => {
+    const first = await tx.wallSegment.findUnique({
+      where: { designId_sequence: { designId, sequence: 0 } },
+    });
+    if (!first) throw badRequest("Create the first wall segment before adding a second");
+
+    const count = await tx.wallSegment.count({ where: { designId } });
+    if (count >= MAX_WALL_SEGMENTS_PER_DESIGN) {
+      throw badRequest(`A design may have at most ${MAX_WALL_SEGMENTS_PER_DESIGN} wall segments`);
+    }
+
+    const id = randomUUID();
+    await tx.geometryNode.create({
+      data: { id, designId, nodeType: "WALL" as GeometryNodeType, label: "Wall Segment 2" },
+    });
+    const segment = await tx.wallSegment.create({
+      data: { id, designId, sequence: 1, lengthMm: input.lengthMm, heightMm: input.heightMm },
+    });
+
+    await tx.geometryEdge.createMany({
+      data: (["LEFT", "RIGHT", "TOP", "BOTTOM"] as const).map((edgeRole) => ({
+        designId,
+        nodeId: id,
+        edgeRole,
+      })),
+    });
+
+    await tx.wallJunction.create({
+      data: { designId, segmentAId: first.id, segmentBId: id, angleDeg: input.angleDeg },
+    });
+
+    const edges = await tx.geometryEdge.findMany({ where: { nodeId: id } });
+    return { segment, edges };
+  });
+}
+
+// In-place dimension edit -- id/GeometryNode identity unchanged, so any
+// Zone/Fixture/ProductInstance already pointing at this segment is
+// unaffected. Distinct from createWallSegment's replace-by-recreation, which
+// only applies to segment 0's very first creation / a from-scratch redo.
+export async function updateWallSegmentDimensions(
+  segmentId: string,
+  input: { lengthMm?: number; heightMm?: number },
+) {
+  const existing = await prisma.wallSegment.findUnique({ where: { id: segmentId } });
+  if (!existing) throw notFound(`Wall segment ${segmentId} not found`);
+  return prisma.wallSegment.update({ where: { id: segmentId }, data: input });
+}
+
+export async function updateWallJunctionAngle(junctionId: string, angleDeg: number) {
+  const existing = await prisma.wallJunction.findUnique({ where: { id: junctionId } });
+  if (!existing) throw notFound(`Wall junction ${junctionId} not found`);
+  return prisma.wallJunction.update({ where: { id: junctionId }, data: { angleDeg } });
+}
+
+// Deletes a wall segment. Deleting segment 1 cascades its WallJunction row
+// (via segmentB's onDelete: Cascade). Deleting segment 0 while segment 1
+// still exists is rejected -- mirroring createWallSegment's own replace
+// guard, the only path to remove segment 0 is: delete segment 1 first, then
+// replace/recreate segment 0.
+export async function deleteWallSegment(designId: string, segmentId: string) {
+  const segment = await prisma.wallSegment.findUnique({ where: { id: segmentId } });
+  if (!segment) throw notFound(`Wall segment ${segmentId} not found`);
+  if (segment.sequence === 0) {
+    const hasSecond = await prisma.wallSegment.count({ where: { designId, sequence: 1 } });
+    if (hasSecond > 0) throw badRequest("Delete the second wall segment first");
+  }
+  await prisma.geometryNode.delete({ where: { id: segmentId } });
+}
+
+// Resolves which WallSegment a Fixture/ProductInstance's mm coordinates are
+// measured in. If the caller supplies an id, it's validated to belong to
+// this design. Otherwise: auto-defaults to the design's sole segment when
+// unambiguous (preserving every single-segment caller's ergonomics
+// unchanged); returns null when the design has no segment yet (caller's own
+// precondition checks apply); throws 400 once 2 segments exist and none was
+// specified -- "nothing silently invented, explicit once ambiguous".
+export async function resolveWallSegmentId(
+  designId: string,
+  provided: string | null | undefined,
+): Promise<string | null> {
+  if (provided) {
+    const exists = await prisma.wallSegment.count({ where: { id: provided, designId } });
+    if (!exists) throw notFound(`Wall segment ${provided} not found in this design`);
+    return provided;
+  }
+  const segments = await prisma.wallSegment.findMany({ where: { designId }, select: { id: true } });
+  if (segments.length === 1) return segments[0].id;
+  if (segments.length === 0) return null;
+  throw badRequest("wallSegmentId is required once a design has more than one wall segment");
 }
 
 export async function createZone(
   designId: string,
   input: {
-    wallId?: string | null;
+    wallSegmentId: string;
     associatesWith: ZoneAssociation;
     orderIndex: number;
     widthMm: number;
@@ -81,9 +173,9 @@ export async function createZone(
     coveLightZMm?: number | null;
   },
 ) {
-  const zoneCount = await prisma.zone.count({ where: { designId } });
-  if (zoneCount >= MAX_ZONES_PER_DESIGN) {
-    throw new Error(`A design may have at most ${MAX_ZONES_PER_DESIGN} zones`);
+  const zoneCount = await prisma.zone.count({ where: { wallSegmentId: input.wallSegmentId } });
+  if (zoneCount >= MAX_ZONES_PER_SEGMENT) {
+    throw new Error(`A wall segment may have at most ${MAX_ZONES_PER_SEGMENT} zones`);
   }
 
   return prisma.$transaction(async (tx: Tx) => {
@@ -95,7 +187,7 @@ export async function createZone(
       data: {
         id,
         designId,
-        wallId: input.wallId ?? null,
+        wallSegmentId: input.wallSegmentId,
         associatesWith: input.associatesWith,
         orderIndex: input.orderIndex,
         widthMm: input.widthMm,

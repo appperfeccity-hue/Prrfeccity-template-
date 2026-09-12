@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { badRequest, notFound } from "@/lib/api/errors";
 import { assertSkuNotDiscontinued } from "@/lib/graph/sku";
+import { resolveWallSegmentId } from "@/lib/graph/geometry";
 import type {
   GeometryProductRelationshipType,
   Prisma,
@@ -41,6 +42,7 @@ export async function createProductInstance(
   input: {
     skuId: string;
     geometryNodeId?: string | null;
+    wallSegmentId?: string | null;
     x?: number | null;
     y?: number | null;
     z?: number | null;
@@ -55,12 +57,21 @@ export async function createProductInstance(
   if (!sku) throw notFound(`SKU ${input.skuId} not found`);
   assertSkuNotDiscontinued(sku);
   await assertOptionsBelongToSku(input.skuId, input);
+  // A geometry-attached instance's segment membership is already implied by
+  // its geometryNodeId (that node belongs to exactly one segment via its
+  // Zone/Partition/Panel chain) -- only freestanding instances (no
+  // geometryNodeId) need resolveWallSegmentId's auto-default/ambiguity
+  // check, matching the same distinction Fixture's own resolution makes.
+  const wallSegmentId = input.geometryNodeId
+    ? (input.wallSegmentId ?? null)
+    : await resolveWallSegmentId(designId, input.wallSegmentId);
 
   return prisma.productInstance.create({
     data: {
       designId,
       skuId: input.skuId,
       geometryNodeId: input.geometryNodeId ?? null,
+      wallSegmentId,
       x: input.x ?? null,
       y: input.y ?? null,
       z: input.z ?? null,
@@ -76,6 +87,7 @@ export async function createProductInstance(
 export async function updateProductInstance(
   instanceId: string,
   input: {
+    wallSegmentId?: string | null;
     x?: number;
     y?: number;
     z?: number;
@@ -106,9 +118,14 @@ export async function updateProductInstance(
     await assertOptionsBelongToSku(existing.skuId, input);
   }
 
+  const data: typeof input = { ...input };
+  if (input.wallSegmentId !== undefined) {
+    data.wallSegmentId = await resolveWallSegmentId(existing.designId, input.wallSegmentId);
+  }
+
   return prisma.productInstance.update({
     where: { id: instanceId },
-    data: input,
+    data,
   });
 }
 

@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { createWall, createZone, createPartition, autoFillPartition } from "@/lib/graph/geometry";
+import {
+  createWallSegment,
+  addWallSegment,
+  deleteWallSegment,
+  createZone,
+  createPartition,
+  autoFillPartition,
+} from "@/lib/graph/geometry";
 import { deleteFixtureDesign } from "./helpers";
 
 let designIdToCleanUp: string | undefined;
@@ -19,9 +26,9 @@ afterEach(async () => {
 
 async function buildEmptyPartitionFixture(widthMm: number) {
   const design = await prisma.design.create({ data: { name: "Auto-fill Fixture" } });
-  const { wall } = await createWall(design.id, { wallType: "STRAIGHT_LTR", lengthMm: widthMm, heightMm: 2400 });
+  const { segment } = await createWallSegment(design.id, { lengthMm: widthMm, heightMm: 2400 });
   const { zone } = await createZone(design.id, {
-    wallId: wall.id,
+    wallSegmentId: segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm,
@@ -100,5 +107,84 @@ describe("autoFillPartition", () => {
     skuIdToCleanUp = sku.id;
 
     await expect(autoFillPartition(design.id, partition.id, sku.id)).rejects.toThrow(/defaultWidthMm/i);
+  });
+});
+
+describe("createWallSegment / addWallSegment / deleteWallSegment", () => {
+  it("createWallSegment creates segment 0 with 4 edges (LEFT/RIGHT/TOP/BOTTOM), no CORNER", async () => {
+    const design = await prisma.design.create({ data: { name: "Wall Segment Fixture" } });
+    designIdToCleanUp = design.id;
+
+    const { segment, edges } = await createWallSegment(design.id, { lengthMm: 3000, heightMm: 2400 });
+
+    expect(segment.sequence).toBe(0);
+    expect(edges).toHaveLength(4);
+    expect(edges.map((e) => e.edgeRole).sort()).toEqual(["BOTTOM", "LEFT", "RIGHT", "TOP"]);
+  });
+
+  it("addWallSegment rejects a second segment before the first exists", async () => {
+    const design = await prisma.design.create({ data: { name: "Wall Segment Fixture" } });
+    designIdToCleanUp = design.id;
+
+    await expect(
+      addWallSegment(design.id, { lengthMm: 2000, heightMm: 2400, angleDeg: 90 }),
+    ).rejects.toThrow(/first wall segment/i);
+  });
+
+  it("addWallSegment creates segment 1 plus a WallJunction connecting it to segment 0", async () => {
+    const design = await prisma.design.create({ data: { name: "Wall Segment Fixture" } });
+    designIdToCleanUp = design.id;
+    const { segment: first } = await createWallSegment(design.id, { lengthMm: 3000, heightMm: 2400 });
+
+    const { segment: second } = await addWallSegment(design.id, { lengthMm: 2000, heightMm: 2400, angleDeg: 135 });
+
+    expect(second.sequence).toBe(1);
+    const junction = await prisma.wallJunction.findFirstOrThrow({ where: { designId: design.id } });
+    expect(junction.segmentAId).toBe(first.id);
+    expect(junction.segmentBId).toBe(second.id);
+    expect(junction.angleDeg).toBe(135);
+  });
+
+  it("rejects a third segment (cap of 2)", async () => {
+    const design = await prisma.design.create({ data: { name: "Wall Segment Fixture" } });
+    designIdToCleanUp = design.id;
+    await createWallSegment(design.id, { lengthMm: 3000, heightMm: 2400 });
+    await addWallSegment(design.id, { lengthMm: 2000, heightMm: 2400, angleDeg: 90 });
+
+    await expect(
+      addWallSegment(design.id, { lengthMm: 1000, heightMm: 2400, angleDeg: 90 }),
+    ).rejects.toThrow(/at most 2 wall segments/i);
+  });
+
+  it("createWallSegment (replace) rejects while a second segment exists", async () => {
+    const design = await prisma.design.create({ data: { name: "Wall Segment Fixture" } });
+    designIdToCleanUp = design.id;
+    await createWallSegment(design.id, { lengthMm: 3000, heightMm: 2400 });
+    await addWallSegment(design.id, { lengthMm: 2000, heightMm: 2400, angleDeg: 90 });
+
+    await expect(
+      createWallSegment(design.id, { lengthMm: 3500, heightMm: 2400 }),
+    ).rejects.toThrow(/delete the second wall segment/i);
+  });
+
+  it("deleteWallSegment rejects deleting segment 0 while segment 1 exists", async () => {
+    const design = await prisma.design.create({ data: { name: "Wall Segment Fixture" } });
+    designIdToCleanUp = design.id;
+    const { segment: first } = await createWallSegment(design.id, { lengthMm: 3000, heightMm: 2400 });
+    await addWallSegment(design.id, { lengthMm: 2000, heightMm: 2400, angleDeg: 90 });
+
+    await expect(deleteWallSegment(design.id, first.id)).rejects.toThrow(/delete the second wall segment first/i);
+  });
+
+  it("deleting segment 1 cascades away its WallJunction row", async () => {
+    const design = await prisma.design.create({ data: { name: "Wall Segment Fixture" } });
+    designIdToCleanUp = design.id;
+    await createWallSegment(design.id, { lengthMm: 3000, heightMm: 2400 });
+    const { segment: second } = await addWallSegment(design.id, { lengthMm: 2000, heightMm: 2400, angleDeg: 90 });
+
+    await deleteWallSegment(design.id, second.id);
+
+    const junctions = await prisma.wallJunction.findMany({ where: { designId: design.id } });
+    expect(junctions).toHaveLength(0);
   });
 });

@@ -86,34 +86,33 @@ async function main() {
   assert(bootstrapLoginUser.role === "ADMIN", "logged-in user's role is ADMIN");
   assert(Boolean(sessionCookie), "login sets a session cookie, used as the default session from here on");
 
-  // 1. Design + wall
-  console.log("1. Create design, set wall (STRAIGHT_LTR, 3000x2400mm)");
+  // 1. Design + wall segment
+  console.log("1. Create design, set wall segment 1 (3000x2400mm)");
   const { json: design } = await api("POST", "/api/designs", { name: "E2E Template" });
   const designId: string = design.id;
 
-  const { json: wallResult } = await api("PUT", `/api/designs/${designId}/wall`, {
-    wallType: "STRAIGHT_LTR",
+  const { json: wallResult } = await api("PUT", `/api/designs/${designId}/wall-segments/first`, {
     lengthMm: 3000,
     heightMm: 2400,
   });
-  assert(wallResult.edges.length === 4, "wall has 4 edges (no CORNER for STRAIGHT_LTR)");
+  assert(wallResult.edges.length === 4, "wall segment has 4 edges (no CORNER)");
   assert(
     !wallResult.edges.some((e: { edgeRole: string }) => e.edgeRole === "CORNER"),
-    "no CORNER edge on a straight wall",
+    "no CORNER edge on a wall segment",
   );
-  const wallId: string = wallResult.wall.id;
+  const wallId: string = wallResult.segment.id;
 
   // 2. Zones + adjacency
   console.log("\n2. Create 2 zones (assert 4th rejected) + adjacency edge");
   const { json: zone1 } = await api("POST", `/api/designs/${designId}/zones`, {
-    wallId,
+    wallSegmentId: wallId,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 1500,
     heightMm: 2400,
   });
   const { json: zone2 } = await api("POST", `/api/designs/${designId}/zones`, {
-    wallId,
+    wallSegmentId: wallId,
     associatesWith: "WALL",
     orderIndex: 1,
     widthMm: 1500,
@@ -130,8 +129,13 @@ async function main() {
 
   console.log("  (max-zone-limit check on a throwaway design, so it doesn't pollute the main one)");
   const { json: limitDesign } = await api("POST", "/api/designs", { name: "E2E Zone Limit Check" });
+  const { json: limitWall } = await api("PUT", `/api/designs/${limitDesign.id}/wall-segments/first`, {
+    lengthMm: 2000,
+    heightMm: 2400,
+  });
   for (let i = 0; i < 3; i++) {
     const { status } = await api("POST", `/api/designs/${limitDesign.id}/zones`, {
+      wallSegmentId: limitWall.segment.id,
       associatesWith: "STRUCTURE",
       orderIndex: i,
       widthMm: 500,
@@ -140,12 +144,13 @@ async function main() {
     assert(status === 201, `zone ${i + 1}/3 accepted (at the 3-zone max)`);
   }
   const { status: fourthZoneStatus } = await api("POST", `/api/designs/${limitDesign.id}/zones`, {
+    wallSegmentId: limitWall.segment.id,
     associatesWith: "STRUCTURE",
     orderIndex: 3,
     widthMm: 500,
     heightMm: 2400,
   });
-  assert(fourthZoneStatus === 400, "4th zone rejected (exceeds 3-zone max)");
+  assert(fourthZoneStatus === 400, "4th zone rejected (exceeds 3-zone max, now per-segment)");
 
   // 3. Partitions + panels
   console.log("\n3. Create partition + panel on each zone, flag zone 1's panel edges");
@@ -258,13 +263,12 @@ async function main() {
   console.log("\n6b. Negative-path check: a design missing the trim relationship");
   const { json: badDesign } = await api("POST", "/api/designs", { name: "E2E Negative Path" });
   const badDesignId: string = badDesign.id;
-  const { json: badWall } = await api("PUT", `/api/designs/${badDesignId}/wall`, {
-    wallType: "STRAIGHT_LTR",
+  const { json: badWall } = await api("PUT", `/api/designs/${badDesignId}/wall-segments/first`, {
     lengthMm: 1000,
     heightMm: 2400,
   });
   const { json: badZone } = await api("POST", `/api/designs/${badDesignId}/zones`, {
-    wallId: badWall.wall.id,
+    wallSegmentId: badWall.segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 1000,
@@ -357,13 +361,12 @@ async function main() {
   // 10. Auto-fill
   console.log("\n10. Auto-fill a partition (drag-and-drop equivalent)");
   const { json: autoFillDesign } = await api("POST", "/api/designs", { name: "E2E Auto-fill" });
-  const { json: autoFillWall } = await api("PUT", `/api/designs/${autoFillDesign.id}/wall`, {
-    wallType: "STRAIGHT_LTR",
+  const { json: autoFillWall } = await api("PUT", `/api/designs/${autoFillDesign.id}/wall-segments/first`, {
     lengthMm: 1250,
     heightMm: 2400,
   });
   const { json: autoFillZone } = await api("POST", `/api/designs/${autoFillDesign.id}/zones`, {
-    wallId: autoFillWall.wall.id,
+    wallSegmentId: autoFillWall.segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 1250,
@@ -386,13 +389,12 @@ async function main() {
 
   console.log("  10b. Negative-path: a partition too narrow to reduce further");
   const { json: negDesign } = await api("POST", "/api/designs", { name: "E2E Auto-fill Sub-minimum" });
-  const { json: negWall } = await api("PUT", `/api/designs/${negDesign.id}/wall`, {
-    wallType: "STRAIGHT_LTR",
+  const { json: negWall } = await api("PUT", `/api/designs/${negDesign.id}/wall-segments/first`, {
     lengthMm: 650,
     heightMm: 2400,
   });
   const { json: negZone } = await api("POST", `/api/designs/${negDesign.id}/zones`, {
-    wallId: negWall.wall.id,
+    wallSegmentId: negWall.segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 650,
@@ -435,13 +437,12 @@ async function main() {
   // 11. Move / resize / rotate / delete
   console.log("\n11. Move/resize/rotate/delete of already-placed instances");
   const { json: moveDesign } = await api("POST", "/api/designs", { name: "E2E Move/Resize/Rotate" });
-  const { json: moveWall } = await api("PUT", `/api/designs/${moveDesign.id}/wall`, {
-    wallType: "STRAIGHT_LTR",
+  const { json: moveWall } = await api("PUT", `/api/designs/${moveDesign.id}/wall-segments/first`, {
     lengthMm: 1200,
     heightMm: 2400,
   });
   const { json: moveZone } = await api("POST", `/api/designs/${moveDesign.id}/zones`, {
-    wallId: moveWall.wall.id,
+    wallSegmentId: moveWall.segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 1200,
@@ -491,6 +492,7 @@ async function main() {
   );
 
   const { json: throwawayZone } = await api("POST", `/api/designs/${moveDesign.id}/zones`, {
+    wallSegmentId: moveWall.segment.id,
     associatesWith: "STRUCTURE",
     orderIndex: 1,
     widthMm: 300,
@@ -519,20 +521,19 @@ async function main() {
   // 12. Zone relationship types
   console.log("\n12. Zone relationship types: spatial vs. non-spatial");
   const { json: relDesign } = await api("POST", "/api/designs", { name: "E2E Zone Relationship Types" });
-  const { json: relWall } = await api("PUT", `/api/designs/${relDesign.id}/wall`, {
-    wallType: "STRAIGHT_LTR",
+  const { json: relWall } = await api("PUT", `/api/designs/${relDesign.id}/wall-segments/first`, {
     lengthMm: 2000,
     heightMm: 2400,
   });
   const { json: relZoneA } = await api("POST", `/api/designs/${relDesign.id}/zones`, {
-    wallId: relWall.wall.id,
+    wallSegmentId: relWall.segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 1000,
     heightMm: 2400,
   });
   const { json: relZoneB } = await api("POST", `/api/designs/${relDesign.id}/zones`, {
-    wallId: relWall.wall.id,
+    wallSegmentId: relWall.segment.id,
     associatesWith: "WALL",
     orderIndex: 1,
     widthMm: 1000,
@@ -567,13 +568,12 @@ async function main() {
   // 13. quantityRule
   console.log("\n13. quantityRule PER_LENGTH_MM overrides the BOM line's quantity");
   const { json: qrDesign } = await api("POST", "/api/designs", { name: "E2E QuantityRule" });
-  const { json: qrWall } = await api("PUT", `/api/designs/${qrDesign.id}/wall`, {
-    wallType: "STRAIGHT_LTR",
+  const { json: qrWall } = await api("PUT", `/api/designs/${qrDesign.id}/wall-segments/first`, {
     lengthMm: 600,
     heightMm: 2400,
   });
   const { json: qrZone } = await api("POST", `/api/designs/${qrDesign.id}/zones`, {
-    wallId: qrWall.wall.id,
+    wallSegmentId: qrWall.segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 600,
@@ -606,34 +606,130 @@ async function main() {
   assert(Boolean(qrLine), "quantityRule relationship produced a BOM line");
   assert(qrLine.quantity === 6, "PER_LENGTH_MM (600mm * 0.01) overrides quantity to 6, not the placed quantity of 1");
 
-  // 14. L-Type wall corner angle must be exactly 90 degrees
-  console.log("\n14. L-Type wall requires an exact 90-degree corner angle");
-  const { json: cornerDesign1 } = await api("POST", "/api/designs", { name: "E2E Corner Angle Default" });
-  const { json: cornerResult1, status: cornerStatus1 } = await api("PUT", `/api/designs/${cornerDesign1.id}/wall`, {
-    wallType: "L_TYPE",
-    lengthMm: 2000,
-    heightMm: 2400,
-  });
-  assert(cornerStatus1 === 201, "omitting cornerAngleDeg on an L-Type wall is accepted");
-  assert(cornerResult1.wall.cornerAngleDeg === 90, "omitted cornerAngleDeg defaults to 90");
+  // 14. Wall Segments/Junctions: full lifecycle over real HTTP -- replaces
+  // the old "L-Type wall corner angle" section (WallType/cornerAngleDeg no
+  // longer exist, replaced outright by WallSegment/WallJunction).
+  console.log("\n14. Wall Segments/Junctions: create, cap enforcement, per-segment scoping, junction angle validation, deletion ordering, RBAC");
 
-  const { json: cornerDesign2 } = await api("POST", "/api/designs", { name: "E2E Corner Angle Wrong" });
-  const { status: cornerStatus2 } = await api("PUT", `/api/designs/${cornerDesign2.id}/wall`, {
-    wallType: "L_TYPE",
-    lengthMm: 2000,
-    heightMm: 2400,
-    cornerAngleDeg: 45,
-  });
-  assert(cornerStatus2 === 400, "an explicit non-90 cornerAngleDeg on an L-Type wall is rejected with 400");
+  const { json: segDesign } = await api("POST", "/api/designs", { name: "E2E Wall Segments" });
+  const segDesignId: string = segDesign.id;
 
-  const { json: cornerDesign3 } = await api("POST", "/api/designs", { name: "E2E Corner Angle Correct" });
-  const { status: cornerStatus3 } = await api("PUT", `/api/designs/${cornerDesign3.id}/wall`, {
-    wallType: "L_TYPE",
+  const { json: seg1Result } = await api("PUT", `/api/designs/${segDesignId}/wall-segments/first`, {
+    lengthMm: 3000,
+    heightMm: 2400,
+  });
+  assert(seg1Result.edges.length === 4, "segment 1 has 4 edges (LEFT/RIGHT/TOP/BOTTOM), no CORNER");
+
+  const { json: throwawaySegDesign } = await api("POST", "/api/designs", { name: "E2E Wall Segments Premature Second" });
+  const { status: prematureSecondStatus } = await api("POST", `/api/designs/${throwawaySegDesign.id}/wall-segments/second`, {
     lengthMm: 2000,
     heightMm: 2400,
-    cornerAngleDeg: 90,
+    angleDeg: 90,
   });
-  assert(cornerStatus3 === 201, "an explicit cornerAngleDeg of 90 on an L-Type wall is accepted");
+  assert(prematureSecondStatus === 400, "adding a second segment before the first exists is rejected 400");
+
+  const { status: addSecondStatus, json: seg2Result } = await api("POST", `/api/designs/${segDesignId}/wall-segments/second`, {
+    lengthMm: 2000,
+    heightMm: 2400,
+    angleDeg: 135,
+  });
+  assert(addSecondStatus === 201, "adding a second segment with a junction angle succeeds");
+
+  const { json: designAfterSecondSegment } = await api("GET", `/api/designs/${segDesignId}`);
+  const junction = designAfterSecondSegment.wallJunctions[0];
+  assert(Boolean(junction), "a WallJunction row now exists connecting the two segments");
+  assert(junction.segmentAId === seg1Result.segment.id && junction.segmentBId === seg2Result.segment.id, "the junction connects segment 1 to segment 2 in order");
+  assert(junction.angleDeg === 135, "the junction's angle matches what was submitted");
+
+  const { status: thirdSegmentStatus } = await api("POST", `/api/designs/${segDesignId}/wall-segments/second`, {
+    lengthMm: 1000,
+    heightMm: 2400,
+    angleDeg: 90,
+  });
+  assert(thirdSegmentStatus === 400, "a third segment is rejected (cap of 2)");
+
+  // Zones on both segments, each within the per-segment 3-zone cap.
+  const { json: segZoneA } = await api("POST", `/api/designs/${segDesignId}/zones`, {
+    wallSegmentId: seg1Result.segment.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 3000,
+    heightMm: 2400,
+  });
+  await api("POST", `/api/designs/${segDesignId}/zones/${segZoneA.zone.id}/partitions`, { orderIndex: 0, widthMm: 3000, heightMm: 2400 });
+  const { json: segZoneB } = await api("POST", `/api/designs/${segDesignId}/zones`, {
+    wallSegmentId: seg2Result.segment.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 2000,
+    heightMm: 2400,
+  });
+  await api("POST", `/api/designs/${segDesignId}/zones/${segZoneB.zone.id}/partitions`, { orderIndex: 0, widthMm: 2000, heightMm: 2400 });
+
+  const { json: segValidationClean } = await api("POST", `/api/designs/${segDesignId}/validate`, {});
+  assert(!segValidationClean.issues.some((i: { code: string }) => i.code === "ZONE_COUNT"), "one zone per segment satisfies ZONE_COUNT on both segments");
+  assert(!segValidationClean.issues.some((i: { code: string }) => i.code === "WALL_JUNCTION_VALID"), "a correctly-formed 2-segment/1-junction design has no WALL_JUNCTION_VALID issues");
+
+  // A fixture on segment 1 and an overlapping-coordinate furniture instance
+  // on segment 2 must NOT collide -- they occupy different physical planes.
+  const vanitySkuId = await skuId("SKU-FURN-VANITY-01");
+  const vanitySizeOptionId = await furnitureSizeOptionId("SKU-FURN-VANITY-01", "SMALL");
+  const { json: segFixture } = await api("POST", `/api/designs/${segDesignId}/fixtures`, {
+    fixtureType: "TV",
+    wallSegmentId: seg1Result.segment.id,
+    xMm: 700,
+    yMm: 575,
+    widthMm: 600,
+    heightMm: 300,
+    clearanceMm: 0,
+  });
+  await api("POST", `/api/designs/${segDesignId}/product-instances`, {
+    skuId: vanitySkuId,
+    wallSegmentId: seg2Result.segment.id,
+    x: 1000,
+    y: 700,
+    quantity: 1,
+    sizeOptionId: vanitySizeOptionId,
+  });
+  const { json: crossSegmentValidation } = await api("POST", `/api/designs/${segDesignId}/validate`, {});
+  assert(!crossSegmentValidation.issues.some((i: { code: string }) => i.code === "FIXTURE_CLEARANCE_OVERLAP"), "a fixture on segment 1 does not collide with an overlapping-coordinate instance on segment 2");
+
+  await api("PATCH", `/api/designs/${segDesignId}/fixtures/${segFixture.id}`, { wallSegmentId: seg2Result.segment.id });
+  const { json: sameSegmentValidation } = await api("POST", `/api/designs/${segDesignId}/validate`, {});
+  assert(sameSegmentValidation.issues.some((i: { code: string }) => i.code === "FIXTURE_CLEARANCE_OVERLAP"), "moving the fixture onto segment 2 (matching the furniture's segment) now collides");
+
+  const { status: badJunctionAngleStatus } = await api("PATCH", `/api/designs/${segDesignId}/wall-junctions/${junction.id}`, { angleDeg: 400 });
+  assert(badJunctionAngleStatus === 400, "PATCHing a junction angle outside (0, 360) is rejected 400 at the API boundary");
+
+  const { status: deleteFirstWhileSecondExistsStatus } = await api("DELETE", `/api/designs/${segDesignId}/wall-segments/${seg1Result.segment.id}`);
+  assert(deleteFirstWhileSecondExistsStatus === 400, "deleting segment 1 while segment 2 exists is rejected 400");
+
+  const { status: deleteSecondStatus } = await api("DELETE", `/api/designs/${segDesignId}/wall-segments/${seg2Result.segment.id}`);
+  assert(deleteSecondStatus === 204, "deleting segment 2 succeeds");
+  const { json: designAfterSecondDeleted } = await api("GET", `/api/designs/${segDesignId}`);
+  assert(designAfterSecondDeleted.wallJunctions.length === 0, "the WallJunction row cascaded away with segment 2");
+
+  const { json: rbacSegDesign } = await api("POST", "/api/designs", { name: "E2E Wall Segments RBAC" });
+  const throwawaySegConsultantEmail = `e2e-throwaway-consultant-segments-${Date.now()}@example.com`;
+  await api("POST", "/api/users", {
+    email: throwawaySegConsultantEmail,
+    password: "e2e-consultant-segments-pw",
+    name: "E2E Throwaway Consultant (Wall Segments)",
+    role: "CONSULTANT",
+  });
+  const { cookie: segConsultantCookie } = await api(
+    "POST",
+    "/api/auth/login",
+    { email: throwawaySegConsultantEmail, password: "e2e-consultant-segments-pw" },
+    "",
+  );
+  const { status: consultantWallSegmentStatus } = await api(
+    "PUT",
+    `/api/designs/${rbacSegDesign.id}/wall-segments/first`,
+    { lengthMm: 2000, heightMm: 2400 },
+    segConsultantCookie,
+  );
+  assert(consultantWallSegmentStatus === 403, "a Consultant is rejected 403 from creating a wall segment -- DESIGNER/ADMIN-authored Template data");
 
   // 15. Suggested Relationships: accepting a suggestion is a plain, explicit,
   // client-composed create -- this proves the server-side contract that
@@ -743,13 +839,12 @@ async function main() {
   const { json: projDesign } = await api("POST", "/api/designs", { name: "E2E Project Template" });
   const projDesignId: string = projDesign.id;
 
-  const { json: projWall } = await api("PUT", `/api/designs/${projDesignId}/wall`, {
-    wallType: "STRAIGHT_LTR",
+  const { json: projWall } = await api("PUT", `/api/designs/${projDesignId}/wall-segments/first`, {
     lengthMm: 1200,
     heightMm: 2400,
   });
   const { json: projZone } = await api("POST", `/api/designs/${projDesignId}/zones`, {
-    wallId: projWall.wall.id,
+    wallSegmentId: projWall.segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 1200,
@@ -996,13 +1091,12 @@ async function main() {
   const { json: fixDesign } = await api("POST", "/api/designs", { name: "E2E Fixture Template" });
   const fixDesignId: string = fixDesign.id;
 
-  const { json: fixWall } = await api("PUT", `/api/designs/${fixDesignId}/wall`, {
-    wallType: "STRAIGHT_LTR",
+  const { json: fixWall } = await api("PUT", `/api/designs/${fixDesignId}/wall-segments/first`, {
     lengthMm: 1200,
     heightMm: 2400,
   });
   const { json: fixZone } = await api("POST", `/api/designs/${fixDesignId}/zones`, {
-    wallId: fixWall.wall.id,
+    wallSegmentId: fixWall.segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 1200,

@@ -1,7 +1,7 @@
 "use client";
 
 import { Layer, Rect, Line, Text } from "react-konva";
-import type { GeometryEdgeModel as GeometryEdge, WallModel as Wall } from "@/generated/prisma/models";
+import type { GeometryEdgeModel as GeometryEdge, WallSegmentModel as Wall } from "@/generated/prisma/models";
 import { mmLengthToBasePx } from "@/lib/canvas/coords";
 import type { CanvasSelection } from "@/lib/canvas/store";
 

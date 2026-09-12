@@ -17,9 +17,10 @@ export async function GET(
       where: { id },
       include: {
         geometryNodes: {
-          include: { wall: true, zone: true, partition: true, panel: true, edges: true },
+          include: { wallSegment: true, zone: true, partition: true, panel: true, edges: true },
         },
         geometryEdgeRelationships: true,
+        wallJunctions: true,
         productInstances: {
           include: {
             sku: { include: { category: true, designOptions: true, colourOptions: true, sizeOptions: true } },

@@ -48,6 +48,10 @@ export type CanvasState = {
   viewport: Viewport;
   layerVisibility: CanvasLayerVisibility;
   snapEnabled: boolean;
+  // Which WallSegment's flat elevation the Design workspace currently shows
+  // (per the "flat per-segment view, switchable" decision -- no bent 2D
+  // overview this pass). null until a segment exists / one is selected.
+  activeSegmentId: string | null;
 };
 
 export const initialCanvasState: CanvasState = {
@@ -56,6 +60,7 @@ export const initialCanvasState: CanvasState = {
   viewport: DEFAULT_VIEWPORT,
   layerVisibility: DEFAULT_LAYER_VISIBILITY,
   snapEnabled: true,
+  activeSegmentId: null,
 };
 
 function sameItem(a: CanvasSelectionItem, b: CanvasSelectionItem) {
@@ -72,6 +77,7 @@ export type CanvasAction =
   | { type: "setViewport"; viewport: Viewport }
   | { type: "toggleLayer"; layer: keyof CanvasLayerVisibility }
   | { type: "toggleSnap" }
+  | { type: "setActiveSegment"; segmentId: string | null }
   | { type: "reset" };
 
 export function canvasReducer(state: CanvasState, action: CanvasAction): CanvasState {
@@ -104,6 +110,11 @@ export function canvasReducer(state: CanvasState, action: CanvasAction): CanvasS
       return { ...state, layerVisibility: { ...state.layerVisibility, [action.layer]: !state.layerVisibility[action.layer] } };
     case "toggleSnap":
       return { ...state, snapEnabled: !state.snapEnabled };
+    case "setActiveSegment":
+      // Mirrors setTool's own precedent: switching which segment's
+      // elevation is shown clears the current selection, since a selected
+      // zone/panel/edge belongs to whichever segment was previously active.
+      return { ...state, activeSegmentId: action.segmentId, selectedItems: [] };
     case "reset":
       return initialCanvasState;
     default:

@@ -74,16 +74,33 @@ export function DesignStage({
   const stageRef = useRef<Konva.Stage>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragPreviewMm, setDragPreviewMm] = useState<MmPoint | null>(null);
-  const { selection, activeTool, viewport, layerVisibility, snapEnabled, select, setViewport } = useCanvasStore();
+  const { selection, activeTool, viewport, layerVisibility, snapEnabled, activeSegmentId, select, setViewport } = useCanvasStore();
 
-  const wallNode = design.geometryNodes.find((n) => n.nodeType === "WALL");
-  const layout = computeZoneLayout(design.geometryNodes, wallNode?.wall);
-  const furnitureInstances = design.productInstances.filter((pi) => pi.sku?.category.key === "FURNITURE");
+  // No true 2D bent rendering this pass -- each segment renders its own flat
+  // elevation; the segment tab bar (DesignStageSection) switches which one
+  // is active via the shared canvas store.
+  const segmentNodes = design.geometryNodes
+    .filter((n) => n.nodeType === "WALL" && n.wallSegment)
+    .sort((a, b) => a.wallSegment!.sequence - b.wallSegment!.sequence);
+  const activeSegmentNode = segmentNodes.find((n) => n.id === activeSegmentId) ?? segmentNodes[0];
+  const layout = computeZoneLayout(design.geometryNodes, activeSegmentNode?.wallSegment);
+  // Fixtures/furniture with no wallSegmentId (unscoped, e.g. rows created
+  // before this pass) render on every segment's tab; segment-scoped rows
+  // render only on their own segment's tab -- matches rule 18's own
+  // "unscoped" bucketing in validation.ts.
+  const activeFixtures = design.fixtures.filter(
+    (fx) => fx.wallSegmentId == null || fx.wallSegmentId === activeSegmentNode?.id,
+  );
+  const furnitureInstances = design.productInstances.filter(
+    (pi) =>
+      pi.sku?.category.key === "FURNITURE" &&
+      (pi.wallSegmentId == null || pi.wallSegmentId === activeSegmentNode?.id),
+  );
 
-  if (!wallNode?.wall) {
-    return <p>Configure the wall first.</p>;
+  if (!activeSegmentNode?.wallSegment) {
+    return <p>Configure the first wall segment first.</p>;
   }
-  const wall = wallNode.wall;
+  const wall = activeSegmentNode.wallSegment;
   const contentHeightMm = wall.heightMm;
 
   const handleWheel = (e: KonvaEventObject<WheelEvent>) => {
@@ -197,7 +214,7 @@ export function DesignStage({
 
           <WallOutlineLayer
             wall={wall}
-            edges={wallNode.edges}
+            edges={activeSegmentNode.edges}
             selection={selection}
             onSelectWall={() => select({ kind: "wall", id: wall.id })}
           />
@@ -216,7 +233,7 @@ export function DesignStage({
 
           {layerVisibility.fixtures && (
             <FixtureLayer
-              fixtures={design.fixtures}
+              fixtures={activeFixtures}
               selection={selection}
               snapEnabled={snapEnabled}
               onSelect={(id) => select({ kind: "fixture", id })}

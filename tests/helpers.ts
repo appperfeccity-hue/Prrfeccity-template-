@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { createWall, createZone, createPartition, createPanel } from "@/lib/graph/geometry";
+import { createWallSegment, createZone, createPartition, createPanel } from "@/lib/graph/geometry";
 import {
   createProductInstance,
   createGeometryProductRelationship,
@@ -50,14 +50,13 @@ async function skuEdgeId(
 export async function buildValidTemplateFixture() {
   const design = await prisma.design.create({ data: { name: "Fixture Template" } });
 
-  const { wall } = await createWall(design.id, {
-    wallType: "STRAIGHT_LTR",
+  const { segment } = await createWallSegment(design.id, {
     lengthMm: 1200,
     heightMm: 2400,
   });
 
   const { zone } = await createZone(design.id, {
-    wallId: wall.id,
+    wallSegmentId: segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 1200,
@@ -157,7 +156,7 @@ export async function buildValidTemplateFixture() {
 
   return {
     design,
-    wall,
+    segment,
     zone,
     partition,
     panel,
@@ -237,13 +236,12 @@ export async function buildPublishedProjectTemplateFixture(
 
   const design = await prisma.design.create({ data: { name: "Project Fixture Template" } });
 
-  const { wall } = await createWall(design.id, {
-    wallType: "STRAIGHT_LTR",
+  const { segment } = await createWallSegment(design.id, {
     lengthMm: 1200,
     heightMm: 2400,
   });
   const { zone } = await createZone(design.id, {
-    wallId: wall.id,
+    wallSegmentId: segment.id,
     associatesWith: "WALL",
     orderIndex: 0,
     widthMm: 1200,
@@ -422,9 +420,10 @@ export async function buildPublishedProjectTemplateFixture(
  * structural position, which is always unique.
  */
 export async function snapshotSemanticState(designId: string) {
-  const [wall, zones, partitions, panels, edges, edgeRelationships, instances, instanceEdges, geoProductRels, params, fixtures] =
+  const [segments, junctions, zones, partitions, panels, edges, edgeRelationships, instances, instanceEdges, geoProductRels, params, fixtures] =
     await Promise.all([
-      prisma.wall.findFirst({ where: { designId } }),
+      prisma.wallSegment.findMany({ where: { designId }, orderBy: { sequence: "asc" } }),
+      prisma.wallJunction.findMany({ where: { designId } }),
       prisma.zone.findMany({ where: { designId } }),
       prisma.zonePartition.findMany({ where: { designId } }),
       prisma.panel.findMany({ where: { designId } }),
@@ -440,9 +439,17 @@ export async function snapshotSemanticState(designId: string) {
       prisma.fixture.findMany({ where: { designId } }),
     ]);
 
+  const segmentSequence = (segmentId: string | null): number | null => {
+    const s = segments.find((ss) => ss.id === segmentId);
+    return s ? s.sequence : null;
+  };
+  // Segment-disambiguated -- two segments each holding a zone with
+  // orderIndex:0 must not collide into the same key, or a dropped
+  // WallSegment/wallSegmentId on revise would silently pass this invariant.
   const zoneKey = (zoneId: string): string | null => {
     const z = zones.find((zz) => zz.id === zoneId);
-    return z ? `zone:${z.orderIndex}` : null;
+    if (!z) return null;
+    return `segment:${segmentSequence(z.wallSegmentId)}/zone:${z.orderIndex}`;
   };
   const partitionKey = (partitionId: string): string | null => {
     const p = partitions.find((pp) => pp.id === partitionId);
@@ -455,7 +462,8 @@ export async function snapshotSemanticState(designId: string) {
     return `${partitionKey(p.partitionId)}/panel:${p.orderIndex}`;
   };
   const nodeKey = (nodeId: string): string => {
-    if (wall && nodeId === wall.id) return "wall";
+    const segment = segments.find((s) => s.id === nodeId);
+    if (segment) return `segment:${segment.sequence}`;
     return zoneKey(nodeId) ?? partitionKey(nodeId) ?? panelKey(nodeId) ?? "unknown-node";
   };
   const edgeKey = (edgeId: string): string => {
@@ -476,12 +484,15 @@ export async function snapshotSemanticState(designId: string) {
   const byKey = <T extends { key: string }>(rows: T[]) => rows.sort((a, b) => a.key.localeCompare(b.key));
 
   return {
-    wall: wall && {
-      wallType: wall.wallType,
-      lengthMm: wall.lengthMm,
-      heightMm: wall.heightMm,
-      cornerAngleDeg: wall.cornerAngleDeg,
-    },
+    wallSegments: [...segments]
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((s) => ({ sequence: s.sequence, lengthMm: s.lengthMm, heightMm: s.heightMm })),
+    wallJunctions: byKey(
+      junctions.map((j) => ({
+        key: `${segmentSequence(j.segmentAId)}<->${segmentSequence(j.segmentBId)}`,
+        angleDeg: j.angleDeg,
+      })),
+    ),
     zones: byKey(
       zones.map((z) => ({
         key: zoneKey(z.id)!,
@@ -491,7 +502,7 @@ export async function snapshotSemanticState(designId: string) {
         heightMm: z.heightMm,
         hasCoveLighting: z.hasCoveLighting,
         coveLightZMm: z.coveLightZMm,
-        attachedToWall: z.wallId != null,
+        attachedToWall: z.wallSegmentId != null,
       })),
     ),
     partitions: byKey(

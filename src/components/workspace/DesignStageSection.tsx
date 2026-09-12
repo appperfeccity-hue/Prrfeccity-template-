@@ -44,7 +44,7 @@ const DROP_RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOU
 export function DesignStageSection({ designId: id }: { designId: string }) {
   const queryClient = useQueryClient();
   const { pushAction } = useUndoRedo();
-  const { selection, clearSelection } = useCanvasStore();
+  const { selection, clearSelection, activeSegmentId, setActiveSegment } = useCanvasStore();
   useKeyboardShortcuts();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
   const skusQuery = useQuery({ queryKey: ["skus"], queryFn: () => api.listSkus() });
@@ -160,7 +160,7 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   });
 
   const placeFurnitureMutation = useMutation({
-    mutationFn: (variables: ArmedFurniture & { x: number; y: number }) =>
+    mutationFn: (variables: ArmedFurniture & { x: number; y: number; wallSegmentId?: string }) =>
       api.createProductInstance(id, variables),
     onSuccess: (result, variables) => {
       invalidate();
@@ -274,7 +274,7 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   });
 
   const createFixtureMutation = useMutation({
-    mutationFn: (variables: ArmedFixture & { xMm: number; yMm: number }) => api.createFixture(id, variables),
+    mutationFn: (variables: ArmedFixture & { xMm: number; yMm: number; wallSegmentId?: string }) => api.createFixture(id, variables),
     onSuccess: (result, variables) => {
       invalidate();
       setArmedFixture(null);
@@ -405,8 +405,33 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
     setPendingDrop({ payload, target });
   };
 
+  const segmentNodes = design.geometryNodes
+    .filter((n) => n.nodeType === "WALL" && n.wallSegment)
+    .sort((a, b) => a.wallSegment!.sequence - b.wallSegment!.sequence);
+  const activeSegmentNode = segmentNodes.find((n) => n.id === activeSegmentId) ?? segmentNodes[0];
+  const junctionForSegment = (segmentId: string | undefined) =>
+    design.wallJunctions.find((j) => j.segmentAId === segmentId || j.segmentBId === segmentId);
+
   return (
     <div className="flex flex-col gap-3">
+      {segmentNodes.length > 0 && (
+        <div className="flex gap-2 text-xs items-center">
+          {segmentNodes.map((n) => {
+            const junction = junctionForSegment(n.id);
+            const isActive = (activeSegmentNode?.id ?? segmentNodes[0]?.id) === n.id;
+            return (
+              <button
+                key={n.id}
+                className={isActive ? "btn" : "btn btn-secondary"}
+                onClick={() => setActiveSegment(n.id)}
+              >
+                Segment {n.wallSegment!.sequence + 1}
+                {junction && ` (${junction.angleDeg}°)`}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {armedFurniture && (
         <p className="text-green-600 text-xs">
           {furnitureSkus.find((s) => s.id === armedFurniture.skuId)?.code ?? "Furniture"} armed — click the canvas to
@@ -427,13 +452,13 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
           onRotatePanel={handleRotatePanel}
           onPlaceFurniture={(xMm, yMm) => {
             if (!armedFurniture) return;
-            placeFurnitureMutation.mutate({ ...armedFurniture, x: xMm, y: yMm });
+            placeFurnitureMutation.mutate({ ...armedFurniture, x: xMm, y: yMm, wallSegmentId: activeSegmentId ?? undefined });
           }}
           onMoveFurniture={handleMoveFurniture}
           onRotateFurniture={handleRotateFurniture}
           onPlaceFixture={(xMm, yMm) => {
             if (!armedFixture) return;
-            createFixtureMutation.mutate({ ...armedFixture, xMm, yMm });
+            createFixtureMutation.mutate({ ...armedFixture, xMm, yMm, wallSegmentId: activeSegmentId ?? undefined });
           }}
           onMoveFixture={handleMoveFixture}
         />

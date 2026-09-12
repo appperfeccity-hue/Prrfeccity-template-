@@ -29,9 +29,9 @@ export async function computeFinalBomLines(projectId: string): Promise<FinalBomL
       where: { projectId },
       include: {
         productInstance: { include: { sku: true } },
-        geometryNode: { include: { wall: true, zone: true, partition: true, panel: true } },
+        geometryNode: { include: { wallSegment: true, zone: true, partition: true, panel: true } },
         geometryEdge: {
-          include: { node: { include: { wall: true, zone: true, partition: true, panel: true } } },
+          include: { node: { include: { wallSegment: true, zone: true, partition: true, panel: true } } },
         },
       },
     }),

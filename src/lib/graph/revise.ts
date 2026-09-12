@@ -40,27 +40,44 @@ export async function reviseTemplate(templateId: string) {
     const edgeIdMap = new Map<string, string>();
     const instanceIdMap = new Map<string, string>();
 
-    const [walls, zones, partitions, panels] = await Promise.all([
-      tx.wall.findMany({ where: { designId: templateId } }),
+    const [segments, zones, partitions, panels] = await Promise.all([
+      tx.wallSegment.findMany({ where: { designId: templateId } }),
       tx.zone.findMany({ where: { designId: templateId } }),
       tx.zonePartition.findMany({ where: { designId: templateId } }),
       tx.panel.findMany({ where: { designId: templateId } }),
     ]);
 
-    for (const wall of walls) {
+    for (const segment of segments) {
       const newId = randomUUID();
-      nodeIdMap.set(wall.id, newId);
+      nodeIdMap.set(segment.id, newId);
       await tx.geometryNode.create({
         data: { id: newId, designId: child.id, nodeType: "WALL" },
       });
-      await tx.wall.create({
+      await tx.wallSegment.create({
         data: {
           id: newId,
           designId: child.id,
-          wallType: wall.wallType,
-          lengthMm: wall.lengthMm,
-          heightMm: wall.heightMm,
-          cornerAngleDeg: wall.cornerAngleDeg,
+          sequence: segment.sequence,
+          lengthMm: segment.lengthMm,
+          heightMm: segment.heightMm,
+        },
+      });
+    }
+
+    // WallJunction has no FK dependents and no analog to remap beyond its
+    // two segment ids -- must run after the segment loop above so
+    // nodeIdMap already has both endpoints. Omitting this would silently
+    // drop the junction on Template revision, the same ripple-effect bug
+    // class this plan file has caught before (RelationshipOrigin, Furniture
+    // options, Fixture).
+    const junctions = await tx.wallJunction.findMany({ where: { designId: templateId } });
+    for (const junction of junctions) {
+      await tx.wallJunction.create({
+        data: {
+          designId: child.id,
+          segmentAId: nodeIdMap.get(junction.segmentAId)!,
+          segmentBId: nodeIdMap.get(junction.segmentBId)!,
+          angleDeg: junction.angleDeg,
         },
       });
     }
@@ -73,7 +90,7 @@ export async function reviseTemplate(templateId: string) {
         data: {
           id: newId,
           designId: child.id,
-          wallId: zone.wallId ? nodeIdMap.get(zone.wallId) : null,
+          wallSegmentId: zone.wallSegmentId ? nodeIdMap.get(zone.wallSegmentId) : null,
           associatesWith: zone.associatesWith,
           orderIndex: zone.orderIndex,
           widthMm: zone.widthMm,
@@ -159,6 +176,7 @@ export async function reviseTemplate(templateId: string) {
           designId: child.id,
           skuId: instance.skuId,
           geometryNodeId: instance.geometryNodeId ? nodeIdMap.get(instance.geometryNodeId) : null,
+          wallSegmentId: instance.wallSegmentId ? nodeIdMap.get(instance.wallSegmentId) : null,
           x: instance.x,
           y: instance.y,
           z: instance.z,
@@ -240,8 +258,10 @@ export async function reviseTemplate(templateId: string) {
       }
     }
 
-    // Fixtures have no FK dependents -- no id-remap needed, just a plain
-    // fetch-and-recreate scoped to the new child design.
+    // Fixtures have no FK dependents of their own -- no id-remap needed for
+    // the row itself, just a plain fetch-and-recreate scoped to the new
+    // child design. wallSegmentId does need remapping via nodeIdMap, same
+    // as ProductInstance's own identical field.
     const fixtures = await tx.fixture.findMany({ where: { designId: templateId } });
     for (const fx of fixtures) {
       await tx.fixture.create({
@@ -249,6 +269,7 @@ export async function reviseTemplate(templateId: string) {
           designId: child.id,
           fixtureType: fx.fixtureType,
           label: fx.label,
+          wallSegmentId: fx.wallSegmentId ? nodeIdMap.get(fx.wallSegmentId) : null,
           xMm: fx.xMm,
           yMm: fx.yMm,
           widthMm: fx.widthMm,

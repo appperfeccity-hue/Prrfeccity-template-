@@ -4,7 +4,7 @@ import { conflict } from "@/lib/api/errors";
 export type QuantityRule = { type: "FIXED"; value: number } | { type: "PER_LENGTH_MM"; perMm: number };
 
 export type QuantityTargetNode = {
-  wall: { lengthMm: number } | null;
+  wallSegment: { lengthMm: number } | null;
   zone: { widthMm: number } | null;
   partition: { widthMm: number } | null;
   panel: { widthMm: number } | null;
@@ -28,7 +28,7 @@ export function resolveQuantity(rel: {
   if (rule.type === "PER_LENGTH_MM") {
     const node = rel.geometryNode ?? rel.geometryEdge?.node ?? null;
     const lengthMm =
-      node?.wall?.lengthMm ?? node?.zone?.widthMm ?? node?.partition?.widthMm ?? node?.panel?.widthMm ?? null;
+      node?.wallSegment?.lengthMm ?? node?.zone?.widthMm ?? node?.partition?.widthMm ?? node?.panel?.widthMm ?? null;
     if (lengthMm != null) return lengthMm * rule.perMm;
     return rel.productInstance.quantity;
   }
@@ -71,9 +71,9 @@ export async function computeMasterBomLines(designId: string): Promise<BomLineIn
       where: { designId },
       include: {
         productInstance: { include: { sku: true } },
-        geometryNode: { include: { wall: true, zone: true, partition: true, panel: true } },
+        geometryNode: { include: { wallSegment: true, zone: true, partition: true, panel: true } },
         geometryEdge: {
-          include: { node: { include: { wall: true, zone: true, partition: true, panel: true } } },
+          include: { node: { include: { wallSegment: true, zone: true, partition: true, panel: true } } },
         },
       },
     }),

@@ -4,7 +4,7 @@ import { reviseTemplate } from "@/lib/graph/revise";
 import { publishTemplate } from "@/lib/graph/publish";
 import { generateMasterBom } from "@/lib/graph/bom";
 import { runAndPersistValidation } from "@/lib/graph/validation";
-import { createWall, createZone, createPartition, createPanel, autoFillPartition } from "@/lib/graph/geometry";
+import { createWallSegment, addWallSegment, createZone, createPartition, createPanel, autoFillPartition } from "@/lib/graph/geometry";
 import { createProductInstance, createGeometryProductRelationship, createProductInstanceEdge } from "@/lib/graph/product";
 import { createFixture } from "@/lib/graph/fixture";
 import { buildValidTemplateFixture, deleteFixtureDesign, snapshotSemanticState } from "./helpers";
@@ -49,9 +49,9 @@ describe("reviseTemplate", () => {
     // support and lose the PANEL_OFFCUT_WASTE warning on the new version.
     const design = await prisma.design.create({ data: { name: "Revise Offcut Fixture" } });
     designIdsToCleanUp.push(design.id);
-    const { wall } = await createWall(design.id, { wallType: "STRAIGHT_LTR", lengthMm: 650, heightMm: 2400 });
+    const { segment } = await createWallSegment(design.id, { lengthMm: 650, heightMm: 2400 });
     const { zone } = await createZone(design.id, {
-      wallId: wall.id,
+      wallSegmentId: segment.id,
       associatesWith: "WALL",
       orderIndex: 0,
       widthMm: 650,
@@ -149,9 +149,14 @@ describe("reviseTemplate", () => {
     const design = await prisma.design.create({ data: { name: "Revise Semantic Invariant Fixture" } });
     designIdsToCleanUp.push(design.id);
 
-    const { wall } = await createWall(design.id, { wallType: "STRAIGHT_LTR", lengthMm: 2000, heightMm: 2400 });
+    const { segment: segment0 } = await createWallSegment(design.id, { lengthMm: 2000, heightMm: 2400 });
+    // A second segment + junction -- exercises the WallJunction copy loop in
+    // revise.ts (the ripple-effect fix this pass added), plus proves
+    // snapshotSemanticState's segment-disambiguated zoneKey actually
+    // distinguishes a zone0's orderIndex:0 from zone2's own orderIndex:0.
+    const { segment: segment2 } = await addWallSegment(design.id, { lengthMm: 800, heightMm: 2400, angleDeg: 90 });
     const { zone: zone0, edges: zone0Edges } = await createZone(design.id, {
-      wallId: wall.id,
+      wallSegmentId: segment0.id,
       associatesWith: "WALL",
       orderIndex: 0,
       widthMm: 650,
@@ -159,10 +164,18 @@ describe("reviseTemplate", () => {
       hasCoveLighting: false,
     });
     const { zone: zone1, edges: zone1Edges } = await createZone(design.id, {
-      wallId: wall.id,
+      wallSegmentId: segment0.id,
       associatesWith: "WALL",
       orderIndex: 1,
       widthMm: 1000,
+      heightMm: 2400,
+      hasCoveLighting: false,
+    });
+    const { zone: zone2 } = await createZone(design.id, {
+      wallSegmentId: segment2.id,
+      associatesWith: "WALL",
+      orderIndex: 0,
+      widthMm: 800,
       heightMm: 2400,
       hasCoveLighting: false,
     });
@@ -200,10 +213,28 @@ describe("reviseTemplate", () => {
     });
     const panel1Instance = await createProductInstance(design.id, { skuId: panelSku.id, geometryNodeId: panel1.id, quantity: 1 });
 
-    const backSheetInstance = await createProductInstance(design.id, { skuId: backSheetSku.id, quantity: 1 });
-    const connectorInstance = await createProductInstance(design.id, { skuId: connectorSku.id, quantity: 1 });
+    const partition2 = await createPartition(design.id, zone2.id, { orderIndex: 0, widthMm: 800, heightMm: 2400 });
+    const { panel: panel2 } = await createPanel(design.id, partition2.id, {
+      orderIndex: 0,
+      widthMm: 800,
+      heightMm: 2400,
+      orientation: "VERTICAL",
+    });
+    const panel2Instance = await createProductInstance(design.id, { skuId: panelSku.id, geometryNodeId: panel2.id, quantity: 1 });
+
+    const backSheetInstance = await createProductInstance(design.id, {
+      skuId: backSheetSku.id,
+      wallSegmentId: segment0.id,
+      quantity: 1,
+    });
+    const connectorInstance = await createProductInstance(design.id, {
+      skuId: connectorSku.id,
+      wallSegmentId: segment0.id,
+      quantity: 1,
+    });
     await createProductInstance(design.id, {
       skuId: furnitureSku.id,
+      wallSegmentId: segment0.id,
       x: 150,
       y: 200,
       quantity: 1,
@@ -223,6 +254,11 @@ describe("reviseTemplate", () => {
       productInstanceId: backSheetInstance.id,
       relationshipType: "BOUNDARY_OF",
     });
+    await createGeometryProductRelationship(design.id, {
+      geometryNodeId: panel2.id,
+      productInstanceId: backSheetInstance.id,
+      relationshipType: "BOUNDARY_OF",
+    });
 
     await createProductInstanceEdge(design.id, {
       fromInstanceId: panel0Instance.id,
@@ -233,6 +269,8 @@ describe("reviseTemplate", () => {
     await createProductInstanceEdge(design.id, { fromInstanceId: panel0Instance.id, toInstanceId: connectorInstance.id, edgeType: "REQUIRES" });
     await createProductInstanceEdge(design.id, { fromInstanceId: panel1Instance.id, toInstanceId: backSheetInstance.id, edgeType: "REQUIRES" });
     await createProductInstanceEdge(design.id, { fromInstanceId: panel1Instance.id, toInstanceId: connectorInstance.id, edgeType: "REQUIRES" });
+    await createProductInstanceEdge(design.id, { fromInstanceId: panel2Instance.id, toInstanceId: backSheetInstance.id, edgeType: "REQUIRES" });
+    await createProductInstanceEdge(design.id, { fromInstanceId: panel2Instance.id, toInstanceId: connectorInstance.id, edgeType: "REQUIRES" });
 
     const param = await prisma.templateParameter.create({
       data: {
@@ -254,6 +292,7 @@ describe("reviseTemplate", () => {
     await createFixture(design.id, {
       fixtureType: "WINDOW",
       label: "Bedroom window",
+      wallSegmentId: segment0.id,
       xMm: 5000,
       yMm: 5000,
       widthMm: 900,

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { validateDesign, runAndPersistValidation } from "@/lib/graph/validation";
-import { createWall, createZone, createPartition, autoFillPartition } from "@/lib/graph/geometry";
+import { createWallSegment, addWallSegment, createZone, createPartition, autoFillPartition } from "@/lib/graph/geometry";
 import { createProductInstance, createGeometryProductRelationship, createProductInstanceEdge } from "@/lib/graph/product";
 import { buildValidTemplateFixture, deleteFixtureDesign } from "./helpers";
 
@@ -115,9 +115,9 @@ describe("validateDesign", () => {
     // the algorithm can't reduce further. PANEL_OFFCUT_WASTE should fire as a
     // WARNING, and the design should otherwise still pass.
     const design = await prisma.design.create({ data: { name: "Offcut Waste Fixture" } });
-    const { wall } = await createWall(design.id, { wallType: "STRAIGHT_LTR", lengthMm: 650, heightMm: 2400 });
+    const { segment } = await createWallSegment(design.id, { lengthMm: 650, heightMm: 2400 });
     const { zone } = await createZone(design.id, {
-      wallId: wall.id,
+      wallSegmentId: segment.id,
       associatesWith: "WALL",
       orderIndex: 0,
       widthMm: 650,
@@ -165,9 +165,9 @@ describe("validateDesign", () => {
 
   it("ZONE_ADJACENCY_INTEGRITY accepts spatial relationship types and rejects non-spatial ones", async () => {
     const design = await prisma.design.create({ data: { name: "Zone Relationship Fixture" } });
-    const { wall } = await createWall(design.id, { wallType: "STRAIGHT_LTR", lengthMm: 2000, heightMm: 2400 });
+    const { segment } = await createWallSegment(design.id, { lengthMm: 2000, heightMm: 2400 });
     const { edges: edgesA } = await createZone(design.id, {
-      wallId: wall.id,
+      wallSegmentId: segment.id,
       associatesWith: "WALL",
       orderIndex: 0,
       widthMm: 1000,
@@ -175,7 +175,7 @@ describe("validateDesign", () => {
       hasCoveLighting: false,
     });
     const { edges: edgesB } = await createZone(design.id, {
-      wallId: wall.id,
+      wallSegmentId: segment.id,
       associatesWith: "WALL",
       orderIndex: 1,
       widthMm: 1000,
@@ -208,9 +208,9 @@ describe("validateDesign", () => {
 
   it("STRUCTURAL_SUPPORT skips offcut panels", async () => {
     const design = await prisma.design.create({ data: { name: "Offcut Structural Skip Fixture" } });
-    const { wall } = await createWall(design.id, { wallType: "STRAIGHT_LTR", lengthMm: 650, heightMm: 2400 });
+    const { segment } = await createWallSegment(design.id, { lengthMm: 650, heightMm: 2400 });
     const { zone } = await createZone(design.id, {
-      wallId: wall.id,
+      wallSegmentId: segment.id,
       associatesWith: "WALL",
       orderIndex: 0,
       widthMm: 650,
@@ -235,18 +235,82 @@ describe("validateDesign", () => {
     await deleteFixtureDesign(design.id);
   });
 
-  it("WALL_CONFIGURED flags an L-Type wall whose corner angle isn't 90 degrees (defense-in-depth)", async () => {
-    // The API-boundary Zod check (setWallSchema) rejects a bad angle before it's ever
-    // written, but this rule is what actually gates runAndPersistValidation()/publish for
-    // any row that predates that check or arrived via revise()'s deep copy -- so it must
-    // catch a bad value directly in the database too, bypassing the API layer entirely.
-    const design = await prisma.design.create({ data: { name: "Bad Corner Angle Fixture" } });
-    const { wall } = await createWall(design.id, { wallType: "L_TYPE", lengthMm: 2000, heightMm: 2400, cornerAngleDeg: 90 });
-    await prisma.wall.update({ where: { id: wall.id }, data: { cornerAngleDeg: 45 } });
+  it("WALL_JUNCTION_VALID flags a junction whose angle drifts outside (0, 360) (defense-in-depth)", async () => {
+    // The API-boundary Zod check (addWallSegmentSchema/updateWallJunctionSchema)
+    // rejects a bad angle before it's ever written, but this rule is what
+    // actually gates runAndPersistValidation()/publish for any row that
+    // predates that check or arrived via revise()'s deep copy -- so it must
+    // catch a bad value directly in the database too, bypassing the API
+    // layer entirely (the direct analog of the old L_TYPE cornerAngleDeg test).
+    const design = await prisma.design.create({ data: { name: "Bad Junction Angle Fixture" } });
+    await createWallSegment(design.id, { lengthMm: 2000, heightMm: 2400 });
+    const { segment: second } = await addWallSegment(design.id, { lengthMm: 1500, heightMm: 2400, angleDeg: 90 });
+    const junction = await prisma.wallJunction.findFirstOrThrow({ where: { designId: design.id } });
+    await prisma.wallJunction.update({ where: { id: junction.id }, data: { angleDeg: 400 } });
 
     const issues = await validateDesign(design.id);
-    const wallIssues = issues.filter((i) => i.code === "WALL_CONFIGURED");
-    expect(wallIssues.some((i) => i.message.includes("90"))).toBe(true);
+    const junctionIssues = issues.filter((i) => i.code === "WALL_JUNCTION_VALID");
+    expect(junctionIssues.some((i) => i.refId === junction.id)).toBe(true);
+    expect(second.sequence).toBe(1);
+
+    await deleteFixtureDesign(design.id);
+  });
+
+  it("WALL_JUNCTION_VALID flags 2 segments with no connecting junction (direct-DB construction, bypassing addWallSegment)", async () => {
+    const design = await prisma.design.create({ data: { name: "Missing Junction Fixture" } });
+    await createWallSegment(design.id, { lengthMm: 2000, heightMm: 2400 });
+    // Bypass addWallSegment (which always creates the junction alongside the
+    // segment) to construct the otherwise-unreachable "2 segments, 0
+    // junctions" state directly.
+    const nodeB = await prisma.geometryNode.create({ data: { designId: design.id, nodeType: "WALL" } });
+    await prisma.wallSegment.create({
+      data: { id: nodeB.id, designId: design.id, sequence: 1, lengthMm: 1500, heightMm: 2400 },
+    });
+
+    const issues = await validateDesign(design.id);
+    expect(issues.some((i) => i.code === "WALL_JUNCTION_VALID")).toBe(true);
+
+    await deleteFixtureDesign(design.id);
+  });
+
+  it("ZONE_COUNT is scoped per wall segment -- one segment over its cap does not affect another segment's own count", async () => {
+    const design = await prisma.design.create({ data: { name: "Per-Segment Zone Count Fixture" } });
+    const { segment: first } = await createWallSegment(design.id, { lengthMm: 4000, heightMm: 2400 });
+    const { segment: second } = await addWallSegment(design.id, { lengthMm: 2000, heightMm: 2400, angleDeg: 90 });
+
+    // Segment 1: 4 zones (over the 3-zone cap). createZone itself already
+    // rejects a 4th zone on one segment (MAX_ZONES_PER_SEGMENT), so this
+    // over-cap state -- deliberately constructed to test the VALIDATION
+    // rule, not the create-time guard -- is built via direct prisma calls,
+    // bypassing that guard on purpose (same defense-in-depth posture as this
+    // file's other direct-DB-construction cases).
+    for (let i = 0; i < 4; i++) {
+      const nodeId = (await prisma.geometryNode.create({ data: { designId: design.id, nodeType: "ZONE" } })).id;
+      await prisma.zone.create({
+        data: {
+          id: nodeId,
+          designId: design.id,
+          wallSegmentId: first.id,
+          associatesWith: "WALL",
+          orderIndex: i,
+          widthMm: 500,
+          heightMm: 2400,
+        },
+      });
+    }
+    // Segment 2: 1 zone (within cap).
+    await createZone(design.id, {
+      wallSegmentId: second.id,
+      associatesWith: "WALL",
+      orderIndex: 0,
+      widthMm: 2000,
+      heightMm: 2400,
+    });
+
+    const issues = await validateDesign(design.id);
+    const zoneCountIssues = issues.filter((i) => i.code === "ZONE_COUNT");
+    expect(zoneCountIssues.some((i) => i.refId === first.id)).toBe(true);
+    expect(zoneCountIssues.some((i) => i.refId === second.id)).toBe(false);
 
     await deleteFixtureDesign(design.id);
   });

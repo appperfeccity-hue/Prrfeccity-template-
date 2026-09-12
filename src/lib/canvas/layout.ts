@@ -1,5 +1,5 @@
 import type { FullDesign } from "@/lib/api/client";
-import type { WallModel } from "@/generated/prisma/models";
+import type { WallSegmentModel } from "@/generated/prisma/models";
 
 type Node = FullDesign["geometryNodes"][number];
 
@@ -51,9 +51,12 @@ export type DesignLayout = {
  * partitionCursor / panelCursor) into pure mm math, decoupled from any
  * particular pixel scale or React/Konva rendering.
  */
-export function computeZoneLayout(nodes: Node[], wall: WallModel | null | undefined): DesignLayout {
+export function computeZoneLayout(
+  nodes: Node[],
+  segment: WallSegmentModel | null | undefined,
+): DesignLayout {
   const zoneNodes = nodes
-    .filter((n) => n.nodeType === "ZONE" && n.zone)
+    .filter((n) => n.nodeType === "ZONE" && n.zone && n.zone.wallSegmentId === segment?.id)
     .sort((a, b) => a.zone!.orderIndex - b.zone!.orderIndex);
 
   const partitionsForZone = (zoneId: string) =>
@@ -116,7 +119,7 @@ export function computeZoneLayout(nodes: Node[], wall: WallModel | null | undefi
     };
   });
 
-  const totalWidthMm = Math.max(wall?.lengthMm ?? 0, cursorX > 0 ? cursorX - ZONE_GAP_MM : 0);
+  const totalWidthMm = Math.max(segment?.lengthMm ?? 0, cursorX > 0 ? cursorX - ZONE_GAP_MM : 0);
 
   return { zones, totalWidthMm };
 }

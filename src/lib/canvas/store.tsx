@@ -27,6 +27,7 @@ type CanvasStoreValue = {
   viewport: Viewport;
   layerVisibility: CanvasLayerVisibility;
   snapEnabled: boolean;
+  activeSegmentId: string | null;
   select: (selection: CanvasSelection) => void;
   selectMultiple: (items: CanvasSelectionItem[]) => void;
   addToSelection: (item: CanvasSelectionItem) => void;
@@ -36,6 +37,7 @@ type CanvasStoreValue = {
   setViewport: (viewport: Viewport) => void;
   toggleLayer: (layer: keyof CanvasLayerVisibility) => void;
   toggleSnap: () => void;
+  setActiveSegment: (segmentId: string | null) => void;
   reset: () => void;
 };
 
@@ -53,6 +55,7 @@ export function CanvasStoreProvider({ children }: { children: React.ReactNode })
   const setViewport = useCallback((viewport: Viewport) => dispatch({ type: "setViewport", viewport }), []);
   const toggleLayer = useCallback((layer: keyof CanvasLayerVisibility) => dispatch({ type: "toggleLayer", layer }), []);
   const toggleSnap = useCallback(() => dispatch({ type: "toggleSnap" }), []);
+  const setActiveSegment = useCallback((segmentId: string | null) => dispatch({ type: "setActiveSegment", segmentId }), []);
   const reset = useCallback(() => dispatch({ type: "reset" }), []);
 
   const selection = state.selectedItems[0] ?? null;
@@ -65,6 +68,7 @@ export function CanvasStoreProvider({ children }: { children: React.ReactNode })
       viewport: state.viewport,
       layerVisibility: state.layerVisibility,
       snapEnabled: state.snapEnabled,
+      activeSegmentId: state.activeSegmentId,
       select,
       selectMultiple,
       addToSelection,
@@ -74,6 +78,7 @@ export function CanvasStoreProvider({ children }: { children: React.ReactNode })
       setViewport,
       toggleLayer,
       toggleSnap,
+      setActiveSegment,
       reset,
     }),
     [
@@ -88,6 +93,7 @@ export function CanvasStoreProvider({ children }: { children: React.ReactNode })
       setViewport,
       toggleLayer,
       toggleSnap,
+      setActiveSegment,
       reset,
     ],
   );

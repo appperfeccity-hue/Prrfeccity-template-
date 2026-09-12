@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { CORNER_ANGLE_TOLERANCE_DEG } from "@/lib/graph/constants";
 
 export const createDesignSchema = z.object({
   name: z.string().min(1),
@@ -21,29 +20,23 @@ export const createUserSchema = z.object({
   role: z.enum(roleValues),
 });
 
-export const setWallSchema = z
-  .object({
-    wallType: z.enum(["STRAIGHT_LTR", "STRAIGHT_RTL", "L_TYPE"]),
-    lengthMm: z.number().positive(),
-    heightMm: z.number().positive(),
-    cornerAngleDeg: z.number().optional(),
-  })
-  // L-Type's corner angle defaults to 90 when omitted (the only supported
-  // value) so existing callers that don't send one keep working; explicitly
-  // sending a different value is still rejected below.
-  .transform((v) => ({
-    ...v,
-    cornerAngleDeg: v.wallType === "L_TYPE" && v.cornerAngleDeg == null ? 90 : v.cornerAngleDeg,
-  }))
-  .refine(
-    (v) =>
-      v.wallType !== "L_TYPE" ||
-      (v.cornerAngleDeg != null && Math.abs(v.cornerAngleDeg - 90) <= CORNER_ANGLE_TOLERANCE_DEG),
-    { message: "L-Type walls must have a corner angle of exactly 90 degrees" },
-  );
+export const createWallSegmentSchema = z.object({
+  lengthMm: z.number().positive(),
+  heightMm: z.number().positive(),
+});
+
+export const addWallSegmentSchema = createWallSegmentSchema.extend({
+  angleDeg: z.number().gt(0).lt(360),
+});
+
+export const updateWallSegmentSchema = createWallSegmentSchema.partial();
+
+export const updateWallJunctionSchema = z.object({
+  angleDeg: z.number().gt(0).lt(360),
+});
 
 export const createZoneSchema = z.object({
-  wallId: z.string().optional(),
+  wallSegmentId: z.string(),
   associatesWith: z.enum(["WALL", "STRUCTURE"]),
   orderIndex: z.number().int().nonnegative(),
   widthMm: z.number().positive(),
@@ -84,6 +77,7 @@ export const createPanelSchema = z.object({
 export const createProductInstanceSchema = z.object({
   skuId: z.string(),
   geometryNodeId: z.string().optional(),
+  wallSegmentId: z.string().optional(),
   x: z.number().optional(),
   y: z.number().optional(),
   z: z.number().optional(),
@@ -175,6 +169,7 @@ export const autoFillPartitionSchema = z.object({
 });
 
 export const updateProductInstanceSchema = z.object({
+  wallSegmentId: z.string().optional(),
   x: z.number().optional(),
   y: z.number().optional(),
   z: z.number().optional(),
@@ -247,6 +242,7 @@ export const fixtureTypes = ["TV", "AC_UNIT", "ELECTRICAL_SOCKET", "WINDOW", "DO
 export const createFixtureSchema = z.object({
   fixtureType: z.enum(fixtureTypes),
   label: z.string().min(1).optional(),
+  wallSegmentId: z.string().optional(),
   xMm: z.number(),
   yMm: z.number(),
   widthMm: z.number().positive(),

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { ValidationIssue } from "@/lib/types";
-import { WIDTH_TOLERANCE_MM, CORNER_ANGLE_TOLERANCE_DEG } from "@/lib/graph/constants";
+import { WIDTH_TOLERANCE_MM } from "@/lib/graph/constants";
 
 const SPATIAL_ADJACENCY_TYPES = new Set(["ADJACENT_TO", "MEETS", "SHARES_BOUNDARY"]);
 
@@ -8,7 +8,8 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
   const issues: ValidationIssue[] = [];
 
   const [
-    wall,
+    segments,
+    junctions,
     zones,
     partitions,
     panels,
@@ -20,7 +21,8 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     templateParameters,
     fixtures,
   ] = await Promise.all([
-    prisma.wall.findFirst({ where: { designId } }),
+    prisma.wallSegment.findMany({ where: { designId }, orderBy: { sequence: "asc" } }),
+    prisma.wallJunction.findMany({ where: { designId } }),
     prisma.zone.findMany({ where: { designId } }),
     prisma.zonePartition.findMany({ where: { designId } }),
     prisma.panel.findMany({ where: { designId } }),
@@ -46,56 +48,64 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     prisma.fixture.findMany({ where: { designId } }),
   ]);
 
+  // Shared grouping used by rules 2 and 4 -- a wall segment's own ordered
+  // zone sequence is the natural per-segment unit both rules reason about.
+  const zonesBySegment = new Map<string, typeof zones>();
+  for (const zone of zones) {
+    if (!zone.wallSegmentId) continue;
+    const list = zonesBySegment.get(zone.wallSegmentId) ?? [];
+    list.push(zone);
+    zonesBySegment.set(zone.wallSegmentId, list);
+  }
+
   // 1. WALL_CONFIGURED
-  if (!wall) {
-    issues.push({ code: "WALL_CONFIGURED", severity: "ERROR", message: "Design has no wall configured" });
+  if (segments.length === 0) {
+    issues.push({ code: "WALL_CONFIGURED", severity: "ERROR", message: "Design has no wall segment configured" });
   } else {
-    if (wall.lengthMm <= 0) {
-      issues.push({
-        code: "WALL_CONFIGURED",
-        severity: "ERROR",
-        message: "Wall length must be positive",
-        refType: "Wall",
-        refId: wall.id,
-      });
-    }
-    if (wall.wallType === "L_TYPE") {
-      if (wall.cornerAngleDeg == null) {
+    for (const segment of segments) {
+      if (segment.lengthMm <= 0) {
         issues.push({
           code: "WALL_CONFIGURED",
           severity: "ERROR",
-          message: "L-Type wall must have a corner angle",
-          refType: "Wall",
-          refId: wall.id,
-        });
-      } else if (Math.abs(wall.cornerAngleDeg - 90) > CORNER_ANGLE_TOLERANCE_DEG) {
-        issues.push({
-          code: "WALL_CONFIGURED",
-          severity: "ERROR",
-          message: "L-Type wall's corner angle must be exactly 90 degrees",
-          refType: "Wall",
-          refId: wall.id,
+          message: `Wall segment ${segment.sequence + 1} length must be positive`,
+          refType: "WallSegment",
+          refId: segment.id,
         });
       }
     }
   }
 
-  // 2. ZONE_COUNT
-  if (zones.length < 1 || zones.length > 3) {
+  // 2. ZONE_COUNT (per segment -- a wall segment's zone sequence is the
+  // natural per-wall unit, matching rule 4's own established grouping)
+  for (const segment of segments) {
+    const group = zonesBySegment.get(segment.id) ?? [];
+    if (group.length < 1 || group.length > 3) {
+      issues.push({
+        code: "ZONE_COUNT",
+        severity: "ERROR",
+        message: `Wall segment ${segment.sequence + 1} must have between 1 and 3 zones (has ${group.length})`,
+        refType: "WallSegment",
+        refId: segment.id,
+      });
+    }
+  }
+  for (const zone of zones.filter((z) => z.wallSegmentId == null)) {
     issues.push({
       code: "ZONE_COUNT",
       severity: "ERROR",
-      message: `Design must have between 1 and 3 zones (has ${zones.length})`,
+      message: "Zone is not assigned to any wall segment",
+      refType: "Zone",
+      refId: zone.id,
     });
   }
 
   // 3. ZONE_ASSOCIATION
   for (const zone of zones) {
-    if (zone.associatesWith === "WALL" && !zone.wallId) {
+    if (zone.associatesWith === "WALL" && !zone.wallSegmentId) {
       issues.push({
         code: "ZONE_ASSOCIATION",
         severity: "ERROR",
-        message: "Zone associated with WALL must reference a wallId",
+        message: "Zone associated with WALL must reference a wallSegmentId",
         refType: "Zone",
         refId: zone.id,
       });
@@ -115,15 +125,8 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     adjacentEdgeIdPairs.add(`${rel.edgeAId}:${rel.edgeBId}`);
     adjacentEdgeIdPairs.add(`${rel.edgeBId}:${rel.edgeAId}`);
   }
-  const zonesByWall = new Map<string, typeof zones>();
-  for (const zone of zones) {
-    if (!zone.wallId) continue;
-    const list = zonesByWall.get(zone.wallId) ?? [];
-    list.push(zone);
-    zonesByWall.set(zone.wallId, list);
-  }
-  for (const wallZones of zonesByWall.values()) {
-    const sorted = [...wallZones].sort((a, b) => a.orderIndex - b.orderIndex);
+  for (const segmentZones of zonesBySegment.values()) {
+    const sorted = [...segmentZones].sort((a, b) => a.orderIndex - b.orderIndex);
     for (let i = 0; i < sorted.length - 1; i++) {
       const zoneA = sorted[i];
       const zoneB = sorted[i + 1];
@@ -438,38 +441,84 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
   // geometry-attached (meaningless freestanding x/y) or have no 2D
   // footprint field at all; a furniture instance missing a sizeOptionId is
   // already independently flagged by rule 12b (FURNITURE_CONFIGURATION_COMPLETE).
-  for (const fx of fixtures) {
-    const fixtureBox = {
-      minX: fx.xMm - fx.clearanceMm,
-      maxX: fx.xMm + fx.widthMm + fx.clearanceMm,
-      minY: fx.yMm - fx.clearanceMm,
-      maxY: fx.yMm + fx.heightMm + fx.clearanceMm,
-    };
-    for (const instance of productInstances) {
-      if (instance.sku.category.key !== "FURNITURE") continue;
-      if (instance.x == null || instance.y == null) continue;
-      if (!instance.sizeOption) continue;
-      const half = { w: instance.sizeOption.widthMm / 2, h: instance.sizeOption.heightMm / 2 };
-      const instanceBox = {
-        minX: instance.x - half.w,
-        maxX: instance.x + half.w,
-        minY: instance.y - half.h,
-        maxY: instance.y + half.h,
+  // Grouped by wallSegmentId first -- a Fixture on one segment and a
+  // furniture instance on another share no physical plane, so comparing
+  // their raw mm coordinates directly would be a false positive/negative
+  // once 2 segments exist. Rows with no segment assigned bucket into
+  // "unscoped" together, preserving today's single-segment behavior exactly.
+  const bySegment = <T extends { wallSegmentId: string | null }>(rows: T[]): Map<string, T[]> => {
+    const map = new Map<string, T[]>();
+    for (const row of rows) {
+      const key = row.wallSegmentId ?? "unscoped";
+      const list = map.get(key) ?? [];
+      list.push(row);
+      map.set(key, list);
+    }
+    return map;
+  };
+  const fixturesBySegment = bySegment(fixtures);
+  const instancesBySegment = bySegment(productInstances);
+  for (const [segmentKey, segmentFixtures] of fixturesBySegment) {
+    const candidateInstances = instancesBySegment.get(segmentKey) ?? [];
+    for (const fx of segmentFixtures) {
+      const fixtureBox = {
+        minX: fx.xMm - fx.clearanceMm,
+        maxX: fx.xMm + fx.widthMm + fx.clearanceMm,
+        minY: fx.yMm - fx.clearanceMm,
+        maxY: fx.yMm + fx.heightMm + fx.clearanceMm,
       };
-      const overlaps =
-        fixtureBox.minX + WIDTH_TOLERANCE_MM < instanceBox.maxX &&
-        fixtureBox.maxX - WIDTH_TOLERANCE_MM > instanceBox.minX &&
-        fixtureBox.minY + WIDTH_TOLERANCE_MM < instanceBox.maxY &&
-        fixtureBox.maxY - WIDTH_TOLERANCE_MM > instanceBox.minY;
-      if (overlaps) {
-        issues.push({
-          code: "FIXTURE_CLEARANCE_OVERLAP",
-          severity: "ERROR",
-          message: `Furniture placement overlaps the clearance zone of fixture "${fx.label ?? fx.fixtureType}"`,
-          refType: "ProductInstance",
-          refId: instance.id,
-        });
+      for (const instance of candidateInstances) {
+        if (instance.sku.category.key !== "FURNITURE") continue;
+        if (instance.x == null || instance.y == null) continue;
+        if (!instance.sizeOption) continue;
+        const half = { w: instance.sizeOption.widthMm / 2, h: instance.sizeOption.heightMm / 2 };
+        const instanceBox = {
+          minX: instance.x - half.w,
+          maxX: instance.x + half.w,
+          minY: instance.y - half.h,
+          maxY: instance.y + half.h,
+        };
+        const overlaps =
+          fixtureBox.minX + WIDTH_TOLERANCE_MM < instanceBox.maxX &&
+          fixtureBox.maxX - WIDTH_TOLERANCE_MM > instanceBox.minX &&
+          fixtureBox.minY + WIDTH_TOLERANCE_MM < instanceBox.maxY &&
+          fixtureBox.maxY - WIDTH_TOLERANCE_MM > instanceBox.minY;
+        if (overlaps) {
+          issues.push({
+            code: "FIXTURE_CLEARANCE_OVERLAP",
+            severity: "ERROR",
+            message: `Furniture placement overlaps the clearance zone of fixture "${fx.label ?? fx.fixtureType}"`,
+            refType: "ProductInstance",
+            refId: instance.id,
+          });
+        }
       }
+    }
+  }
+
+  // 19. WALL_JUNCTION_VALID -- these states shouldn't be reachable via the
+  // API (addWallSegment always creates segment+junction together;
+  // deleteWallSegment guards against a dangling junction), but this is
+  // defense-in-depth against direct DB tampering, the same posture as the
+  // old L_TYPE cornerAngleDeg check this rule replaces.
+  if (junctions.length > 1) {
+    issues.push({ code: "WALL_JUNCTION_VALID", severity: "ERROR", message: "A design may have at most 1 wall junction" });
+  }
+  if (segments.length === 2 && junctions.length === 0) {
+    issues.push({ code: "WALL_JUNCTION_VALID", severity: "ERROR", message: "Two wall segments require a connecting junction" });
+  }
+  if (segments.length < 2 && junctions.length > 0) {
+    issues.push({ code: "WALL_JUNCTION_VALID", severity: "ERROR", message: "A wall junction exists without two wall segments to connect" });
+  }
+  for (const junction of junctions) {
+    if (junction.angleDeg <= 0 || junction.angleDeg >= 360) {
+      issues.push({
+        code: "WALL_JUNCTION_VALID",
+        severity: "ERROR",
+        message: "Wall junction angle must be between 0 and 360 degrees, exclusive",
+        refType: "WallJunction",
+        refId: junction.id,
+      });
     }
   }
 

@@ -65,12 +65,15 @@ export function Inspector({
     return <EdgeInspectorPanel designId={designId} edge={edge} onClose={onClose} />;
   }
 
-  if (selection.kind === "wall" && node?.wall) {
+  if (selection.kind === "wall" && node?.wallSegment) {
+    const junction = design.wallJunctions.find(
+      (j) => j.segmentAId === node.id || j.segmentBId === node.id,
+    );
     return (
-      <InspectorShell title="Wall" onClose={onClose}>
-        <Field label="Type" value={node.wall.wallType} />
-        <Field label="Length" value={`${node.wall.lengthMm}mm`} />
-        <Field label="Height" value={`${node.wall.heightMm}mm`} />
+      <InspectorShell title={`Segment ${node.wallSegment.sequence + 1}`} onClose={onClose}>
+        <Field label="Length" value={`${node.wallSegment.lengthMm}mm`} />
+        <Field label="Height" value={`${node.wallSegment.heightMm}mm`} />
+        {junction && <Field label="Junction angle" value={`${junction.angleDeg}°`} />}
         <p className="text-xs text-foreground/50 mt-2">Edit from the Wall panel above.</p>
       </InspectorShell>
     );
@@ -292,8 +295,8 @@ function InstanceView({
     ? design.geometryNodes.find((n) => n.id === instance.geometryNodeId)
     : undefined;
   const attachedLabel = attachedNode
-    ? attachedNode.wall
-      ? "Wall"
+    ? attachedNode.wallSegment
+      ? `Segment ${attachedNode.wallSegment.sequence + 1}`
       : attachedNode.zone
         ? `Zone ${attachedNode.zone.orderIndex}`
         : attachedNode.partition

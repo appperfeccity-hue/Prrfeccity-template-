@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { computeZoneLayout, ZONE_GAP_MM } from "@/lib/canvas/layout";
 import type { FullDesign } from "@/lib/api/client";
-import type { WallModel } from "@/generated/prisma/models";
+import type { WallSegmentModel } from "@/generated/prisma/models";
 
 type Node = FullDesign["geometryNodes"][number];
 
-function zoneNode(id: string, orderIndex: number, widthMm: number, heightMm = 2400): Node {
+function zoneNode(
+  id: string,
+  orderIndex: number,
+  widthMm: number,
+  heightMm = 2400,
+  wallSegmentId = "seg1",
+): Node {
   return {
     id,
     nodeType: "ZONE",
-    zone: { id, orderIndex, widthMm, heightMm, associatesWith: "WALL", hasCoveLighting: false },
+    zone: { id, orderIndex, widthMm, heightMm, associatesWith: "WALL", hasCoveLighting: false, wallSegmentId },
   } as unknown as Node;
 }
 
@@ -43,7 +49,7 @@ function panelNode(
   } as unknown as Node;
 }
 
-const wall = { lengthMm: 3000, heightMm: 2400 } as unknown as WallModel;
+const wall = { id: "seg1", lengthMm: 3000, heightMm: 2400 } as unknown as WallSegmentModel;
 
 describe("computeZoneLayout", () => {
   it("positions a single zone/partition/panel at the origin", () => {
@@ -113,5 +119,20 @@ describe("computeZoneLayout", () => {
     const nodes = [zoneNode("z1", 0, 5000)];
     const layout = computeZoneLayout(nodes, wall);
     expect(layout.totalWidthMm).toBe(5000);
+  });
+
+  it("only returns zones scoped to the passed segment, even when other segments' zones are in the same nodes array", () => {
+    const segmentA = { id: "segA", lengthMm: 1000, heightMm: 2400 } as unknown as WallSegmentModel;
+    const segmentB = { id: "segB", lengthMm: 800, heightMm: 2400 } as unknown as WallSegmentModel;
+    const nodes = [
+      zoneNode("zA", 0, 1000, 2400, "segA"),
+      zoneNode("zB", 0, 800, 2400, "segB"),
+    ];
+
+    const layoutA = computeZoneLayout(nodes, segmentA);
+    expect(layoutA.zones.map((z) => z.id)).toEqual(["zA"]);
+
+    const layoutB = computeZoneLayout(nodes, segmentB);
+    expect(layoutB.zones.map((z) => z.id)).toEqual(["zB"]);
   });
 });

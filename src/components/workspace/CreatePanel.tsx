@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import { useUndoRedo } from "@/lib/undo-redo";
+import { useCanvasStore } from "@/lib/canvas/store";
 import type { GeometryEdgeRelationshipTypeValue } from "@/lib/api/client";
 
 const ZONE_RELATIONSHIP_TYPES: { value: GeometryEdgeRelationshipTypeValue; label: string }[] = [
@@ -25,13 +26,22 @@ const ZONE_RELATIONSHIP_TYPES: { value: GeometryEdgeRelationshipTypeValue; label
 export function CreatePanel({ designId: id, isDraft }: { designId: string; isDraft: boolean }) {
   const queryClient = useQueryClient();
   const { pushAction } = useUndoRedo();
+  const { activeSegmentId } = useCanvasStore();
   const designQuery = useQuery({ queryKey: ["design", id], queryFn: () => api.getDesign(id) });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["design", id] });
 
   const design = designQuery.data;
-  const wallNode = design?.geometryNodes.find((n) => n.nodeType === "WALL");
-  const zoneNodes = design?.geometryNodes.filter((n) => n.nodeType === "ZONE") ?? [];
+  const segmentNodes = (design?.geometryNodes ?? [])
+    .filter((n) => n.nodeType === "WALL" && n.wallSegment)
+    .sort((a, b) => a.wallSegment!.sequence - b.wallSegment!.sequence);
+  const activeSegmentNode = segmentNodes.find((n) => n.id === activeSegmentId) ?? segmentNodes[0];
+  // Zone creation always targets the currently-active segment (tab bar in
+  // DesignStageSection) -- every zone is segment-scoped now, regardless of
+  // associatesWith.
+  const zoneNodes = (design?.geometryNodes ?? []).filter(
+    (n) => n.nodeType === "ZONE" && n.zone?.wallSegmentId === activeSegmentNode?.id,
+  );
 
   // --- Add Zone ---
   const [zoneWidth, setZoneWidth] = useState(1000);
@@ -139,8 +149,8 @@ export function CreatePanel({ designId: id, isDraft }: { designId: string; isDra
     },
   });
 
-  if (!wallNode?.wall) {
-    return <p>Configure the wall first.</p>;
+  if (!activeSegmentNode?.wallSegment) {
+    return <p>Configure the first wall segment first.</p>;
   }
 
   return (
@@ -176,11 +186,11 @@ export function CreatePanel({ designId: id, isDraft }: { designId: string; isDra
             disabled={!isDraft || zoneNodes.length >= 3 || addZoneMutation.isPending}
             onClick={() =>
               addZoneMutation.mutate({
-                wallId: associatesWith === "WALL" ? wallNode?.wall?.id : undefined,
+                wallSegmentId: activeSegmentNode!.id,
                 associatesWith,
                 orderIndex: zoneNodes.length,
                 widthMm: zoneWidth,
-                heightMm: wallNode?.wall?.heightMm ?? 2400,
+                heightMm: activeSegmentNode?.wallSegment?.heightMm ?? 2400,
                 hasCoveLighting,
                 coveLightZMm: hasCoveLighting ? coveLightZMm : undefined,
               })

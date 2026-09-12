@@ -18,6 +18,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     geometryProductRelationships,
     productInstanceEdges,
     templateParameters,
+    fixtures,
   ] = await Promise.all([
     prisma.wall.findFirst({ where: { designId } }),
     prisma.zone.findMany({ where: { designId } }),
@@ -27,7 +28,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
     prisma.geometryEdgeRelationship.findMany({ where: { designId } }),
     prisma.productInstance.findMany({
       where: { designId },
-      include: { sku: { include: { category: true, sizeOptions: true } } },
+      include: { sku: { include: { category: true, sizeOptions: true } }, sizeOption: true },
     }),
     prisma.geometryProductRelationship.findMany({
       where: { designId },
@@ -42,6 +43,7 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
       },
     }),
     prisma.templateParameter.findMany({ where: { templateId: designId }, include: { permission: true } }),
+    prisma.fixture.findMany({ where: { designId } }),
   ]);
 
   // 1. WALL_CONFIGURED
@@ -425,6 +427,49 @@ export async function validateDesign(designId: string): Promise<ValidationIssue[
         refType: "Panel",
         refId: panel.id,
       });
+    }
+  }
+
+  // 18. FIXTURE_CLEARANCE_OVERLAP -- a Fixture never enters the Master BOM
+  // (structurally impossible, not filtered here -- see bom.ts's three
+  // provenance sources), but its clearance zone is a real installation
+  // constraint. Scoped to FURNITURE-category instances with a resolved
+  // sizeOptionId only -- non-furniture instances are typically
+  // geometry-attached (meaningless freestanding x/y) or have no 2D
+  // footprint field at all; a furniture instance missing a sizeOptionId is
+  // already independently flagged by rule 12b (FURNITURE_CONFIGURATION_COMPLETE).
+  for (const fx of fixtures) {
+    const fixtureBox = {
+      minX: fx.xMm - fx.clearanceMm,
+      maxX: fx.xMm + fx.widthMm + fx.clearanceMm,
+      minY: fx.yMm - fx.clearanceMm,
+      maxY: fx.yMm + fx.heightMm + fx.clearanceMm,
+    };
+    for (const instance of productInstances) {
+      if (instance.sku.category.key !== "FURNITURE") continue;
+      if (instance.x == null || instance.y == null) continue;
+      if (!instance.sizeOption) continue;
+      const half = { w: instance.sizeOption.widthMm / 2, h: instance.sizeOption.heightMm / 2 };
+      const instanceBox = {
+        minX: instance.x - half.w,
+        maxX: instance.x + half.w,
+        minY: instance.y - half.h,
+        maxY: instance.y + half.h,
+      };
+      const overlaps =
+        fixtureBox.minX + WIDTH_TOLERANCE_MM < instanceBox.maxX &&
+        fixtureBox.maxX - WIDTH_TOLERANCE_MM > instanceBox.minX &&
+        fixtureBox.minY + WIDTH_TOLERANCE_MM < instanceBox.maxY &&
+        fixtureBox.maxY - WIDTH_TOLERANCE_MM > instanceBox.minY;
+      if (overlaps) {
+        issues.push({
+          code: "FIXTURE_CLEARANCE_OVERLAP",
+          severity: "ERROR",
+          message: `Furniture placement overlaps the clearance zone of fixture "${fx.label ?? fx.fixtureType}"`,
+          refType: "ProductInstance",
+          refId: instance.id,
+        });
+      }
     }
   }
 

@@ -33,6 +33,7 @@ export async function GET(
         templateParameters: { include: { permission: true } },
         validationResults: { orderBy: { ranAt: "desc" }, take: 1 },
         masterBoms: { orderBy: { version: "desc" }, take: 1, include: { lines: true } },
+        fixtures: true,
       },
     });
     if (!design) throw notFound(`Design ${id} not found`);

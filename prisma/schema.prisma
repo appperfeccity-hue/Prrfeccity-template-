@@ -112,6 +112,7 @@ model Design {
   validationResults            DesignValidationResult[]
   masterBoms                   MasterBom[]
   projects                     Project[]
+  fixtures                     Fixture[]
 
   @@index([rootTemplateId])
   @@index([status])
@@ -807,4 +808,52 @@ model FinalBomLine {
 
   @@index([finalBomId])
   @@index([skuId])
+}
+
+// ---------------------------------------------------------------------------
+// Fixture (customer/site elements -- never enter the BOM)
+// ---------------------------------------------------------------------------
+
+enum FixtureType {
+  TV
+  AC_UNIT
+  ELECTRICAL_SOCKET
+  WINDOW
+  DOOR
+}
+
+// A customer/site element (TV, AC unit, socket, window, door) that exists in
+// the physical space a Template will be installed into. Drives
+// placement/clearance constraints (validation rule 18,
+// FIXTURE_CLEARANCE_OVERLAP) but is a site fact, not a manufactured or
+// purchased item -- it must NEVER appear in the Master BOM. This is
+// structural, not filtered: Fixture has no FK into ProductInstance,
+// GeometryProductRelationship, or ProductInstanceEdge, and
+// computeMasterBomLines has no fourth provenance source to find one through
+// even if it wanted to.
+//
+// xMm/yMm are the TOP-LEFT corner of the fixture's bounding box (matching
+// Wall/Zone/Partition/Panel's own left-edge convention) -- NOT
+// ProductInstance's center-anchor convention (see FurnitureLayer.tsx's Konva
+// offsetX/offsetY). Both live in the same wall-elevation mm plane as every
+// other geometry entity ((0,0) at the wall's top-left); no depth/z axis is
+// modeled.
+model Fixture {
+  id          String      @id @default(cuid())
+  designId    String
+  design      Design      @relation(fields: [designId], references: [id], onDelete: Cascade)
+  fixtureType FixtureType
+  label       String?
+  xMm         Float
+  yMm         Float
+  widthMm     Float
+  heightMm    Float
+  // Required clearance beyond the fixture's own box, in mm, applied
+  // uniformly on all four sides. Defaults to 0 -- "no clearance
+  // requirement" until the Designer explicitly sets one.
+  clearanceMm Float       @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([designId])
 }

@@ -8,7 +8,7 @@ import { DEFAULT_VIEWPORT, type Viewport } from "@/lib/canvas/viewport";
  * mounting anything.
  */
 
-export type CanvasSelectionKind = "wall" | "zone" | "partition" | "panel" | "edge" | "instance";
+export type CanvasSelectionKind = "wall" | "zone" | "partition" | "panel" | "edge" | "instance" | "fixture";
 export type CanvasSelectionItem = { kind: CanvasSelectionKind; id: string };
 /** The "primary" selection -- the first selected item, or null. Every M4
  * layer/consumer reads this single-value shape; multi-select (selectedItems)
@@ -31,6 +31,7 @@ export type CanvasLayerVisibility = {
   dependencies: boolean;
   validation: boolean;
   furniture: boolean;
+  fixtures: boolean;
 };
 
 const DEFAULT_LAYER_VISIBILITY: CanvasLayerVisibility = {
@@ -38,6 +39,7 @@ const DEFAULT_LAYER_VISIBILITY: CanvasLayerVisibility = {
   dependencies: true,
   validation: true,
   furniture: true,
+  fixtures: true,
 };
 
 export type CanvasState = {

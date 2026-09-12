@@ -17,6 +17,7 @@ import { ZonesLayer } from "@/components/canvas/layers/ZonesLayer";
 import { SkuPlacementLayer } from "@/components/canvas/layers/SkuPlacementLayer";
 import { LightingLayer } from "@/components/canvas/layers/LightingLayer";
 import { FurnitureLayer } from "@/components/canvas/layers/FurnitureLayer";
+import { FixtureLayer } from "@/components/canvas/layers/FixtureLayer";
 import { TrimsLayer } from "@/components/canvas/layers/TrimsLayer";
 import { MeasurementsLayer } from "@/components/canvas/layers/MeasurementsLayer";
 import { SelectionLayer } from "@/components/canvas/layers/SelectionLayer";
@@ -43,6 +44,9 @@ const ZOOM_FACTOR = 1.1;
  * reused unchanged; this component only converts between screen/mm space
  * and dispatches to those existing callbacks, mirroring exactly what
  * WallCanvas/ZoneCanvas/FurnitureCanvas used to do individually.
+ *
+ * Authoritative layer order: Grid, Wall, Zones, SKU placement, Lighting,
+ * Fixture, Furniture, Trims, Measurements, Selection, Grid overlay.
  */
 export function DesignStage({
   design,
@@ -53,6 +57,8 @@ export function DesignStage({
   onPlaceFurniture,
   onMoveFurniture,
   onRotateFurniture,
+  onPlaceFixture,
+  onMoveFixture,
 }: {
   design: FullDesign;
   onSelectEdge?: (edge: GeometryEdgeModel) => void;
@@ -62,6 +68,8 @@ export function DesignStage({
   onPlaceFurniture?: (xMm: number, yMm: number) => void;
   onMoveFurniture?: (instanceId: string, xMm: number, yMm: number) => void;
   onRotateFurniture?: (instanceId: string, rotationDeg: number) => void;
+  onPlaceFixture?: (xMm: number, yMm: number) => void;
+  onMoveFixture?: (fixtureId: string, xMm: number, yMm: number) => void;
 }) {
   const stageRef = useRef<Konva.Stage>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,12 +103,14 @@ export function DesignStage({
   const handleStageClick = (e: KonvaEventObject<MouseEvent | TouchEvent>) => {
     if (e.target !== e.target.getStage()) return;
     select(null);
-    if (!onPlaceFurniture) return;
     const stage = e.target.getStage();
     const relative = stage?.getRelativePointerPosition();
     if (!relative) return;
     const mm = snapMmPoint(basePxToMm(relative), snapEnabled);
-    onPlaceFurniture(mm.x, mm.y);
+    // Both callbacks self-guard on their own arm-state at the call site,
+    // and arming one always clears the other, so at most one ever fires.
+    onPlaceFurniture?.(mm.x, mm.y);
+    onPlaceFixture?.(mm.x, mm.y);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -203,6 +213,16 @@ export function DesignStage({
           <SkuPlacementLayer design={design} layout={layout} />
 
           {layerVisibility.dependencies && <LightingLayer design={design} layout={layout} />}
+
+          {layerVisibility.fixtures && (
+            <FixtureLayer
+              fixtures={design.fixtures}
+              selection={selection}
+              snapEnabled={snapEnabled}
+              onSelect={(id) => select({ kind: "fixture", id })}
+              onMove={onMoveFixture}
+            />
+          )}
 
           {layerVisibility.furniture && (
             <FurnitureLayer

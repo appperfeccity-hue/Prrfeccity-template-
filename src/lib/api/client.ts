@@ -27,6 +27,7 @@ import type {
   ProjectGeometryProductRelationshipModel as ProjectGeometryProductRelationship,
   FinalBomModel as FinalBom,
   FinalBomLineModel as FinalBomLine,
+  FixtureModel as Fixture,
 } from "@/generated/prisma/models";
 import type { ValidationIssue } from "@/lib/types";
 import type { BomLineInput } from "@/lib/graph/bom";
@@ -71,7 +72,10 @@ export type FullDesign = Design & {
   templateParameters: (TemplateParameter & { permission: ConsultantPermission | null })[];
   validationResults: DesignValidationResult[];
   masterBoms: (MasterBom & { lines: unknown[] })[];
+  fixtures: Fixture[];
 };
+
+export type { Fixture };
 
 export type FullProject = Project & {
   template: Design & { templateParameters: (TemplateParameter & { permission: ConsultantPermission | null })[] };
@@ -95,6 +99,8 @@ export type QuantityRule =
 export type RelationshipOriginValue = "DESIGNER_DEFINED" | "CATALOG_DERIVED";
 
 export type LibraryRoomTypeValue = "LIVING_ROOM" | "TV_UNIT" | "BEDROOM";
+
+export type FixtureTypeValue = "TV" | "AC_UNIT" | "ELECTRICAL_SOCKET" | "WINDOW" | "DOOR";
 
 export const api = {
   listDesigns: () => request<Design[]>("GET", "/designs"),
@@ -339,4 +345,33 @@ export const api = {
   getFinalBom: (id: string) => request<FinalBom & { lines: FinalBomLine[] }>("GET", `/projects/${id}/final-bom`),
   generateFinalBom: (id: string) =>
     request<FinalBom & { lines: FinalBomLine[] }>("POST", `/projects/${id}/final-bom`, {}),
+
+  listFixtures: (id: string) => request<Fixture[]>("GET", `/designs/${id}/fixtures`),
+  createFixture: (
+    id: string,
+    data: {
+      fixtureType: FixtureTypeValue;
+      label?: string;
+      xMm: number;
+      yMm: number;
+      widthMm: number;
+      heightMm: number;
+      clearanceMm?: number;
+    },
+  ) => request<Fixture>("POST", `/designs/${id}/fixtures`, data),
+  updateFixture: (
+    id: string,
+    fixtureId: string,
+    data: Partial<{
+      fixtureType: FixtureTypeValue;
+      label: string | null;
+      xMm: number;
+      yMm: number;
+      widthMm: number;
+      heightMm: number;
+      clearanceMm: number;
+    }>,
+  ) => request<Fixture>("PATCH", `/designs/${id}/fixtures/${fixtureId}`, data),
+  deleteFixture: (id: string, fixtureId: string) =>
+    request<void>("DELETE", `/designs/${id}/fixtures/${fixtureId}`),
 };

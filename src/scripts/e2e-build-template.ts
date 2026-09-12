@@ -985,6 +985,161 @@ async function main() {
   );
   assert(designerCreateProjectStatus === 403, "DESIGNER is rejected 403 from creating a Project (zero Project access)");
 
+  // 19. Fixture Model: a customer/site element that drives a real
+  // clearance-overlap validation error but is structurally incapable of
+  // ever appearing in the Master BOM (Fixture has no FK into
+  // ProductInstance/ProductInstanceEdge/GeometryProductRelationship, so
+  // computeMasterBomLines has no path to it -- proven here by output
+  // equality against a recorded zero-fixture baseline, not just argued).
+  console.log("\n19. Fixture Model: clearance-overlap validation, move-clear, BOM exclusion, RBAC");
+
+  const { json: fixDesign } = await api("POST", "/api/designs", { name: "E2E Fixture Template" });
+  const fixDesignId: string = fixDesign.id;
+
+  const { json: fixWall } = await api("PUT", `/api/designs/${fixDesignId}/wall`, {
+    wallType: "STRAIGHT_LTR",
+    lengthMm: 1200,
+    heightMm: 2400,
+  });
+  const { json: fixZone } = await api("POST", `/api/designs/${fixDesignId}/zones`, {
+    wallId: fixWall.wall.id,
+    associatesWith: "WALL",
+    orderIndex: 0,
+    widthMm: 1200,
+    heightMm: 2400,
+  });
+  const { json: fixPartition } = await api(
+    "POST",
+    `/api/designs/${fixDesignId}/zones/${fixZone.zone.id}/partitions`,
+    { orderIndex: 0, widthMm: 1200, heightMm: 2400 },
+  );
+  const { json: fixPanelResult } = await api(
+    "POST",
+    `/api/designs/${fixDesignId}/partitions/${fixPartition.id}/panels`,
+    { orderIndex: 0, widthMm: 1200, heightMm: 2400, orientation: "VERTICAL" },
+  );
+  const fixPanel = fixPanelResult.panel;
+  const [fixEdgeStart] = fixPanelResult.edges;
+  await api("PUT", `/api/designs/${fixDesignId}/geometry-edges/${fixEdgeStart.id}`, { requiresTrim: true });
+
+  const fixInstance = async (code: string, extra: Record<string, unknown> = {}) => {
+    const { json } = await api("POST", `/api/designs/${fixDesignId}/product-instances`, {
+      skuId: await skuId(code),
+      ...extra,
+    });
+    return json;
+  };
+  const fixPanelInstance = await fixInstance("SKU-PANEL-600", { geometryNodeId: fixPanel.id });
+  const fixBackSheetInstance = await fixInstance("SKU-PVC-BACK-01");
+  const fixConnectorInstance = await fixInstance("SKU-CONNECTOR-H", { quantity: 1 });
+  const fixTrimInstance = await fixInstance("SKU-TRIM-EDGE-01");
+  const fixFurnitureInstance = await fixInstance("SKU-FURN-VANITY-01", {
+    x: 1000,
+    y: 1000,
+    quantity: 1,
+    sizeOptionId: await furnitureSizeOptionId("SKU-FURN-VANITY-01", "SMALL"),
+  });
+
+  await api("POST", `/api/designs/${fixDesignId}/geometry-product-relationships`, {
+    geometryEdgeId: fixEdgeStart.id,
+    productInstanceId: fixTrimInstance.id,
+    relationshipType: "HAS_TREATMENT",
+  });
+  await api("POST", `/api/designs/${fixDesignId}/geometry-product-relationships`, {
+    geometryNodeId: fixPanel.id,
+    productInstanceId: fixBackSheetInstance.id,
+    relationshipType: "BOUNDARY_OF",
+  });
+  await api("POST", `/api/designs/${fixDesignId}/product-instance-edges`, {
+    fromInstanceId: fixPanelInstance.id,
+    toInstanceId: fixBackSheetInstance.id,
+    edgeType: "REQUIRES",
+    sourceSkuEdgeId: await skuEdgeId("SKU-PANEL-600", "SKU-PVC-BACK-01"),
+  });
+  await api("POST", `/api/designs/${fixDesignId}/product-instance-edges`, {
+    fromInstanceId: fixPanelInstance.id,
+    toInstanceId: fixConnectorInstance.id,
+    edgeType: "REQUIRES",
+    sourceSkuEdgeId: await skuEdgeId("SKU-PANEL-600", "SKU-CONNECTOR-H"),
+  });
+
+  const { json: fixBaselineValidation } = await api("POST", `/api/designs/${fixDesignId}/validate`, {});
+  if (!fixBaselineValidation.passed) console.error("Fixture template baseline validation issues:", fixBaselineValidation.issues);
+  assert(fixBaselineValidation.passed === true, "the dedicated Fixture template passes validation with zero Fixtures placed");
+
+  const { json: fixBaselineBom } = await api("POST", `/api/designs/${fixDesignId}/bom`, {});
+  const fixBaselineSkuIds = (fixBaselineBom.lines as { skuId: string }[]).map((l) => l.skuId).sort();
+
+  // The furniture instance's SMALL size option is 600mm wide x 850mm tall,
+  // centered at (1000,1000) -- its box is [700,1300] x [575,1425]. A TV
+  // fixture at (1310,575), 500x300mm, sits a 10mm gap away (clean at
+  // clearanceMm: 0, since 10mm > WIDTH_TOLERANCE_MM) but its clearance zone
+  // overlaps the furniture box once clearanceMm: 200 is applied.
+  const { status: createFixtureStatus, json: fixture } = await api("POST", `/api/designs/${fixDesignId}/fixtures`, {
+    fixtureType: "TV",
+    label: "Living room TV",
+    xMm: 1310,
+    yMm: 575,
+    widthMm: 500,
+    heightMm: 300,
+    clearanceMm: 200,
+  });
+  assert(createFixtureStatus === 201, "creating a Fixture succeeds");
+
+  const { json: overlapValidation } = await api("POST", `/api/designs/${fixDesignId}/validate`, {});
+  const overlapIssue = overlapValidation.issues.find((i: { code: string }) => i.code === "FIXTURE_CLEARANCE_OVERLAP");
+  assert(Boolean(overlapIssue), "FIXTURE_CLEARANCE_OVERLAP fires once the fixture's 200mm clearance zone overlaps the furniture box");
+  assert(overlapIssue?.refId === fixFurnitureInstance.id, "the issue references the overlapping furniture instance");
+  assert(overlapIssue?.severity === "ERROR", "FIXTURE_CLEARANCE_OVERLAP is an ERROR (blocks publish)");
+  assert(overlapValidation.passed === false, "validation fails while the overlap exists");
+
+  await api("PATCH", `/api/designs/${fixDesignId}/fixtures/${fixture.id}`, { xMm: 5000, yMm: 5000 });
+  const { json: clearValidation } = await api("POST", `/api/designs/${fixDesignId}/validate`, {});
+  assert(
+    !clearValidation.issues.some((i: { code: string }) => i.code === "FIXTURE_CLEARANCE_OVERLAP"),
+    "moving the fixture clear of the furniture removes the FIXTURE_CLEARANCE_OVERLAP issue",
+  );
+  assert(clearValidation.passed === true, "validation passes again once the fixture is moved clear");
+
+  await api("PATCH", `/api/designs/${fixDesignId}/fixtures/${fixture.id}`, {
+    xMm: 1310,
+    yMm: 575,
+    clearanceMm: 0,
+  });
+  const { json: adjacentValidation } = await api("POST", `/api/designs/${fixDesignId}/validate`, {});
+  assert(
+    !adjacentValidation.issues.some((i: { code: string }) => i.code === "FIXTURE_CLEARANCE_OVERLAP"),
+    "back at the 10mm-gap position with clearanceMm: 0, the fixture is adjacent but not overlapping -- stays clean (boundary proof)",
+  );
+  assert(adjacentValidation.passed === true, "validation passes at the boundary case");
+
+  const { json: fixBomAfter } = await api("POST", `/api/designs/${fixDesignId}/bom`, {});
+  const fixAfterSkuIds = (fixBomAfter.lines as { skuId: string }[]).map((l) => l.skuId).sort();
+  assert(
+    fixBomAfter.lines.length === fixBaselineBom.lines.length,
+    "the Master BOM's line count is identical with the Fixture present as without it",
+  );
+  assert(
+    JSON.stringify(fixAfterSkuIds) === JSON.stringify(fixBaselineSkuIds),
+    "the Master BOM's exact skuId set is unchanged -- the Fixture produced no line, structurally, not just numerically",
+  );
+
+  const { status: deleteFixtureStatus } = await api("DELETE", `/api/designs/${fixDesignId}/fixtures/${fixture.id}`);
+  assert(deleteFixtureStatus === 204, "deleting the Fixture succeeds");
+  const { json: fixturesAfterDelete } = await api("GET", `/api/designs/${fixDesignId}/fixtures`);
+  assert(fixturesAfterDelete.length === 0, "the Fixture no longer appears in a subsequent GET");
+
+  const { status: consultantCreateFixtureStatus } = await api(
+    "POST",
+    `/api/designs/${fixDesignId}/fixtures`,
+    { fixtureType: "DOOR", xMm: 0, yMm: 0, widthMm: 900, heightMm: 2000 },
+    consultantACookie,
+  );
+  assert(
+    consultantCreateFixtureStatus === 403,
+    "a Consultant is rejected 403 from creating a Fixture -- Fixtures are DESIGNER/ADMIN-authored Template data",
+  );
+
   console.log(`\nAll ${assertions} assertions passed.`);
 }
 

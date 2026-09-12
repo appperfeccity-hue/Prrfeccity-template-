@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFixtureUpdateInput,
   buildInstanceMoveInput,
   buildInstanceOptionsInput,
   buildInstanceQuantityInput,
@@ -115,6 +116,28 @@ describe("buildInstanceOptionsInput (furniture catalogue configuration change --
     const result = buildInstanceOptionsInput("i1", { sizeOptionId: "size-large" }, {});
     expect(result).not.toHaveProperty("skuId");
     expect(result.next).not.toHaveProperty("skuId");
+  });
+});
+
+describe("buildFixtureUpdateInput (Fixture field edits -- label/width/height/clearance/position, no rotation/catalogue-options)", () => {
+  it("carries next and previous through unmodified -- no rounding/clamping needed, unlike panel resize or rotation", () => {
+    expect(buildFixtureUpdateInput("fx1", { widthMm: 1200.5 }, { widthMm: 900 })).toEqual({
+      fixtureId: "fx1",
+      next: { widthMm: 1200.5 },
+      previous: { widthMm: 900 },
+    });
+  });
+
+  it("omits fields not present in next rather than nulling them out", () => {
+    const result = buildFixtureUpdateInput("fx1", { xMm: 100, yMm: 200 }, {});
+    expect(result.next).not.toHaveProperty("widthMm");
+    expect(result.next).not.toHaveProperty("clearanceMm");
+  });
+
+  it("carries a null label through explicitly (clearing it is a valid edit, not an omission)", () => {
+    const result = buildFixtureUpdateInput("fx1", { label: null }, { label: "Old label" });
+    expect(result.next.label).toBeNull();
+    expect(result.previous.label).toBe("Old label");
   });
 });
 

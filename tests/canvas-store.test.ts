@@ -4,6 +4,7 @@ import { canvasReducer, initialCanvasState, type CanvasSelectionItem } from "@/l
 const panel1: CanvasSelectionItem = { kind: "panel", id: "panel-1" };
 const panel2: CanvasSelectionItem = { kind: "panel", id: "panel-2" };
 const instance1: CanvasSelectionItem = { kind: "instance", id: "inst-1" };
+const fixture1: CanvasSelectionItem = { kind: "fixture", id: "fixture-1" };
 
 describe("canvasReducer selection", () => {
   it("select() replaces the selection with a single item", () => {
@@ -41,6 +42,17 @@ describe("canvasReducer selection", () => {
   it("selectMultiple sets the full selection set directly", () => {
     const state = canvasReducer(initialCanvasState, { type: "selectMultiple", items: [panel1, instance1] });
     expect(state.selectedItems).toEqual([panel1, instance1]);
+  });
+
+  it("a 'fixture' selection kind behaves identically to every other kind -- the reducer needed no changes beyond the type union", () => {
+    let state = canvasReducer(initialCanvasState, { type: "select", selection: fixture1 });
+    expect(state.selectedItems).toEqual([fixture1]);
+    state = canvasReducer(state, { type: "toggleInSelection", item: fixture1 });
+    expect(state.selectedItems).toEqual([]);
+    state = canvasReducer(state, { type: "addToSelection", item: fixture1 });
+    expect(state.selectedItems).toEqual([fixture1]);
+    state = canvasReducer(state, { type: "clearSelection" });
+    expect(state.selectedItems).toEqual([]);
   });
 });
 

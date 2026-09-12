@@ -73,3 +73,26 @@ export function buildInstanceOptionsInput(
 ): InstanceOptionsInput {
   return { instanceId, next, previous };
 }
+
+// One generic update path covers every Fixture field edit (label/width/
+// height/clearance/position) -- deliberately simpler than furniture's
+// several separate per-field mutations, since Fixture has far fewer
+// distinct concerns (no rotation, no catalogue options, no quantity).
+// Fields left out of `next` are omitted from the mutate/undo payload
+// entirely, not overwritten to null.
+export type FixtureFields = {
+  label?: string | null;
+  xMm?: number;
+  yMm?: number;
+  widthMm?: number;
+  heightMm?: number;
+  clearanceMm?: number;
+};
+export type FixtureUpdateInput = { fixtureId: string; next: FixtureFields; previous: FixtureFields };
+export function buildFixtureUpdateInput(
+  fixtureId: string,
+  next: FixtureFields,
+  previous: FixtureFields,
+): FixtureUpdateInput {
+  return { fixtureId, next, previous };
+}

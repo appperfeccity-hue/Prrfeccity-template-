@@ -7,18 +7,21 @@ import { useUndoRedo } from "@/lib/undo-redo";
 import { useCanvasStore } from "@/lib/canvas/store";
 import { useKeyboardShortcuts } from "@/lib/canvas/keyboard";
 import {
+  buildFixtureUpdateInput,
   buildInstanceMoveInput,
   buildInstanceOptionsInput,
   buildInstanceQuantityInput,
   buildInstanceRotateInput,
   buildPanelResizeInput,
   buildPanelRotateInput,
+  type FixtureFields,
   type InstanceOptionIds,
 } from "@/lib/canvas/mutations";
 import { DesignStage, type DesignStageDropTarget } from "@/components/canvas/DesignStage";
 import { Inspector } from "@/components/inspector/Inspector";
 import { SkuPalette, type SkuDragPayload } from "@/components/palette/SkuPalette";
 import { FurnitureCatalogue, type ArmedFurniture } from "@/components/palette/FurnitureCatalogue";
+import { FixturePalette, type ArmedFixture } from "@/components/palette/FixturePalette";
 
 const DROP_RELATIONSHIP_TYPES = ["HAS_TREATMENT", "SUPPORTS", "TERMINATES", "BOUNDARY_OF", "POSITIONED_AT", "ADJACENT_TO"];
 
@@ -53,6 +56,7 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
   const [pendingDrop, setPendingDrop] = useState<{ payload: SkuDragPayload; target: { kind: "panel" | "edge"; id: string } } | null>(null);
   const [dropRelationshipType, setDropRelationshipType] = useState(DROP_RELATIONSHIP_TYPES[0]);
   const [armedFurniture, setArmedFurniture] = useState<ArmedFurniture | null>(null);
+  const [armedFixture, setArmedFixture] = useState<ArmedFixture | null>(null);
   const furnitureSkus = (skusQuery.data ?? []).filter((s) => s.category.key === "FURNITURE");
   const nonFurnitureSkus = (skusQuery.data ?? []).filter((s) => s.category.key !== "FURNITURE");
 
@@ -269,10 +273,50 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
     },
   });
 
+  const createFixtureMutation = useMutation({
+    mutationFn: (variables: ArmedFixture & { xMm: number; yMm: number }) => api.createFixture(id, variables),
+    onSuccess: (result, variables) => {
+      invalidate();
+      setArmedFixture(null);
+      let currentId = result.id;
+      pushAction({
+        description: `Place fixture (${variables.fixtureType})`,
+        undo: async () => {
+          await api.deleteFixture(id, currentId);
+          invalidate();
+        },
+        redo: async () => {
+          const r = await api.createFixture(id, variables);
+          currentId = r.id;
+          invalidate();
+        },
+      });
+    },
+  });
+
+  const updateFixtureMutation = useMutation({
+    mutationFn: (input: ReturnType<typeof buildFixtureUpdateInput>) => api.updateFixture(id, input.fixtureId, input.next),
+    onSuccess: (_result, input) => {
+      invalidate();
+      pushAction({
+        description: `Update fixture`,
+        undo: async () => {
+          await api.updateFixture(id, input.fixtureId, input.previous);
+          invalidate();
+        },
+        redo: async () => {
+          await api.updateFixture(id, input.fixtureId, input.next);
+          invalidate();
+        },
+      });
+    },
+  });
+
   if (!design) return null;
 
   const findPanel = (panelId: string) => design.geometryNodes.find((n) => n.id === panelId)?.panel;
   const findInstance = (instanceId: string) => design.productInstances.find((i) => i.id === instanceId);
+  const findFixture = (fixtureId: string) => design.fixtures.find((f) => f.id === fixtureId);
 
   const handleResizePanel = (panelId: string, widthMm: number) => {
     const previousWidthMm = findPanel(panelId)?.widthMm;
@@ -321,10 +365,29 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
     updateInstanceOptionsMutation.mutate(buildInstanceOptionsInput(instanceId, next, previous));
   };
 
+  const handleMoveFixture = (fixtureId: string, xMm: number, yMm: number) => {
+    const fx = findFixture(fixtureId);
+    if (!fx) return;
+    updateFixtureMutation.mutate(
+      buildFixtureUpdateInput(fixtureId, { xMm, yMm }, { xMm: fx.xMm, yMm: fx.yMm }),
+    );
+  };
+
+  const handleUpdateFixture = (fixtureId: string, next: FixtureFields) => {
+    const fx = findFixture(fixtureId);
+    if (!fx) return;
+    const previous: FixtureFields = {};
+    for (const key of Object.keys(next) as (keyof FixtureFields)[]) {
+      (previous as Record<string, unknown>)[key] = fx[key];
+    }
+    updateFixtureMutation.mutate(buildFixtureUpdateInput(fixtureId, next, previous));
+  };
+
   const handleDeleteZone = (zoneId: string) => api.deleteZone(id, zoneId).then(invalidate);
   const handleDeletePartition = (partitionId: string) => api.deleteGeometryNode(id, partitionId).then(invalidate);
   const handleDeletePanel = (panelId: string) => api.deleteGeometryNode(id, panelId).then(invalidate);
   const handleDeleteInstance = (instanceId: string) => api.deleteProductInstance(id, instanceId).then(invalidate);
+  const handleDeleteFixture = (fixtureId: string) => api.deleteFixture(id, fixtureId).then(invalidate);
 
   const handleDropSku = (payload: SkuDragPayload, target: DesignStageDropTarget | null) => {
     // Furniture is never draggable from the generic palette -- it only ever
@@ -350,6 +413,9 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
           position it.
         </p>
       )}
+      {armedFixture && (
+        <p className="text-green-600 text-xs">{armedFixture.fixtureType} fixture armed — click the canvas to position it.</p>
+      )}
       <div className="flex gap-4 items-start">
         <DesignStage
           design={design}
@@ -365,6 +431,11 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
           }}
           onMoveFurniture={handleMoveFurniture}
           onRotateFurniture={handleRotateFurniture}
+          onPlaceFixture={(xMm, yMm) => {
+            if (!armedFixture) return;
+            createFixtureMutation.mutate({ ...armedFixture, xMm, yMm });
+          }}
+          onMoveFixture={handleMoveFixture}
         />
         <div className="flex flex-col gap-3">
           {selection && (
@@ -385,9 +456,25 @@ export function DesignStageSection({ designId: id }: { designId: string }) {
               onDeleteInstance={(instanceId) => handleDeleteInstance(instanceId)}
               onDeleteZone={(zoneId) => handleDeleteZone(zoneId)}
               onDeletePartition={(partitionId) => handleDeletePartition(partitionId)}
+              onUpdateFixture={handleUpdateFixture}
+              onDeleteFixture={(fixtureId) => handleDeleteFixture(fixtureId)}
             />
           )}
-          <FurnitureCatalogue skus={furnitureSkus} armed={armedFurniture} onArm={setArmedFurniture} />
+          <FurnitureCatalogue
+            skus={furnitureSkus}
+            armed={armedFurniture}
+            onArm={(f) => {
+              setArmedFixture(null);
+              setArmedFurniture(f);
+            }}
+          />
+          <FixturePalette
+            armed={armedFixture}
+            onArm={(f) => {
+              setArmedFurniture(null);
+              setArmedFixture(f);
+            }}
+          />
           <SkuPalette skus={nonFurnitureSkus} />
         </div>
       </div>

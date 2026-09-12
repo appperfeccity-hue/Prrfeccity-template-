@@ -242,6 +242,20 @@ export const setProjectEdgeTreatmentSchema = z.object({
   skuId: z.string(),
 });
 
+export const fixtureTypes = ["TV", "AC_UNIT", "ELECTRICAL_SOCKET", "WINDOW", "DOOR"] as const;
+
+export const createFixtureSchema = z.object({
+  fixtureType: z.enum(fixtureTypes),
+  label: z.string().min(1).optional(),
+  xMm: z.number(),
+  yMm: z.number(),
+  widthMm: z.number().positive(),
+  heightMm: z.number().positive(),
+  clearanceMm: z.number().nonnegative().optional(),
+});
+
+export const updateFixtureSchema = createFixtureSchema.partial();
+
 export type ValidationIssueSeverity = "ERROR" | "WARNING";
 
 export type ValidationIssue = {

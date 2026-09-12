@@ -422,7 +422,7 @@ export async function buildPublishedProjectTemplateFixture(
  * structural position, which is always unique.
  */
 export async function snapshotSemanticState(designId: string) {
-  const [wall, zones, partitions, panels, edges, edgeRelationships, instances, instanceEdges, geoProductRels, params] =
+  const [wall, zones, partitions, panels, edges, edgeRelationships, instances, instanceEdges, geoProductRels, params, fixtures] =
     await Promise.all([
       prisma.wall.findFirst({ where: { designId } }),
       prisma.zone.findMany({ where: { designId } }),
@@ -437,6 +437,7 @@ export async function snapshotSemanticState(designId: string) {
       prisma.productInstanceEdge.findMany({ where: { designId } }),
       prisma.geometryProductRelationship.findMany({ where: { designId } }),
       prisma.templateParameter.findMany({ where: { templateId: designId }, include: { permission: true } }),
+      prisma.fixture.findMany({ where: { designId } }),
     ]);
 
   const zoneKey = (zoneId: string): string | null => {
@@ -582,5 +583,19 @@ export async function snapshotSemanticState(designId: string) {
         },
       }))
       .sort((a, b) => a.paramKey.localeCompare(b.paramKey)),
+    // Fixture rows have no natural structural key the way geometry-attached
+    // instances do -- a value-based key is the honest choice here.
+    fixtures: fixtures
+      .map((fx) => ({
+        key: `fixture:${fx.fixtureType}:${fx.xMm},${fx.yMm}`,
+        fixtureType: fx.fixtureType,
+        label: fx.label,
+        xMm: fx.xMm,
+        yMm: fx.yMm,
+        widthMm: fx.widthMm,
+        heightMm: fx.heightMm,
+        clearanceMm: fx.clearanceMm,
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
   };
 }

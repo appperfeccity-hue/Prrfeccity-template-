@@ -6,6 +6,7 @@ import { generateMasterBom } from "@/lib/graph/bom";
 import { runAndPersistValidation } from "@/lib/graph/validation";
 import { createWall, createZone, createPartition, createPanel, autoFillPartition } from "@/lib/graph/geometry";
 import { createProductInstance, createGeometryProductRelationship, createProductInstanceEdge } from "@/lib/graph/product";
+import { createFixture } from "@/lib/graph/fixture";
 import { buildValidTemplateFixture, deleteFixtureDesign, snapshotSemanticState } from "./helpers";
 
 let designIdsToCleanUp: string[] = [];
@@ -246,6 +247,18 @@ describe("reviseTemplate", () => {
     });
     await prisma.consultantPermission.create({
       data: { templateParameterId: param.id, editableByConsultant: true, minValue: 600, maxValue: 1500 },
+    });
+
+    // Placed far from every instance's footprint so it doesn't trip
+    // FIXTURE_CLEARANCE_OVERLAP and break the passed===true assertion below.
+    await createFixture(design.id, {
+      fixtureType: "WINDOW",
+      label: "Bedroom window",
+      xMm: 5000,
+      yMm: 5000,
+      widthMm: 900,
+      heightMm: 1200,
+      clearanceMm: 50,
     });
 
     const { passed, issues } = await runAndPersistValidation(design.id);

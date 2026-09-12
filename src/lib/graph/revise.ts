@@ -240,6 +240,24 @@ export async function reviseTemplate(templateId: string) {
       }
     }
 
+    // Fixtures have no FK dependents -- no id-remap needed, just a plain
+    // fetch-and-recreate scoped to the new child design.
+    const fixtures = await tx.fixture.findMany({ where: { designId: templateId } });
+    for (const fx of fixtures) {
+      await tx.fixture.create({
+        data: {
+          designId: child.id,
+          fixtureType: fx.fixtureType,
+          label: fx.label,
+          xMm: fx.xMm,
+          yMm: fx.yMm,
+          widthMm: fx.widthMm,
+          heightMm: fx.heightMm,
+          clearanceMm: fx.clearanceMm,
+        },
+      });
+    }
+
     return child;
   });
 }

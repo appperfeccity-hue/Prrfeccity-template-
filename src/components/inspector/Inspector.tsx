@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { FullDesign } from "@/lib/api/client";
 import type { CanvasSelection } from "@/lib/canvas/store";
-import { toggleOrientation, type InstanceOptionIds, type PanelOrientation } from "@/lib/canvas/mutations";
+import { toggleOrientation, type FixtureFields, type InstanceOptionIds, type PanelOrientation } from "@/lib/canvas/mutations";
 import { EdgeInspectorPanel } from "@/components/canvas/EdgeInspectorPanel";
 
 /**
@@ -33,6 +33,8 @@ export function Inspector({
   onDeleteInstance,
   onDeleteZone,
   onDeletePartition,
+  onUpdateFixture,
+  onDeleteFixture,
 }: {
   designId: string;
   design: FullDesign;
@@ -50,6 +52,8 @@ export function Inspector({
   onDeleteInstance: (instanceId: string) => void;
   onDeleteZone: (zoneId: string) => void;
   onDeletePartition: (partitionId: string) => void;
+  onUpdateFixture: (fixtureId: string, next: FixtureFields) => void;
+  onDeleteFixture: (fixtureId: string) => void;
 }) {
   if (!selection) return null;
 
@@ -138,6 +142,21 @@ export function Inspector({
         onUpdateInstanceZ={onUpdateInstanceZ}
         onUpdateInstanceOptions={onUpdateInstanceOptions}
         onDeleteInstance={onDeleteInstance}
+        onClose={onClose}
+      />
+    );
+  }
+
+  if (selection.kind === "fixture") {
+    const fixture = design.fixtures.find((f) => f.id === selection.id);
+    if (!fixture) return null;
+    return (
+      <FixtureView
+        key={fixture.id}
+        fixture={fixture}
+        isDraft={isDraft}
+        onUpdateFixture={onUpdateFixture}
+        onDeleteFixture={onDeleteFixture}
         onClose={onClose}
       />
     );
@@ -463,5 +482,114 @@ function FurnitureOptionFields({
         <Field label="Fixed dimensions" value={`${selectedSize.widthMm} × ${selectedSize.depthMm} × ${selectedSize.heightMm}mm`} />
       )}
     </>
+  );
+}
+
+// Type is read-only -- changing a site fact's kind after placement, while
+// dimensions still reflect the old kind, is a confusing UI affordance even
+// though the API doesn't forbid it. Delete-and-recreate is the intended
+// path for "wrong type" (see src/lib/graph/fixture.ts).
+function FixtureView({
+  fixture,
+  isDraft,
+  onUpdateFixture,
+  onDeleteFixture,
+  onClose,
+}: {
+  fixture: FullDesign["fixtures"][number];
+  isDraft: boolean;
+  onUpdateFixture: (fixtureId: string, next: FixtureFields) => void;
+  onDeleteFixture: (fixtureId: string) => void;
+  onClose: () => void;
+}) {
+  const [labelDraft, setLabelDraft] = useState(fixture.label ?? "");
+  const [widthDraft, setWidthDraft] = useState(String(fixture.widthMm));
+  const [heightDraft, setHeightDraft] = useState(String(fixture.heightMm));
+  const [clearanceDraft, setClearanceDraft] = useState(String(fixture.clearanceMm));
+  const [xDraft, setXDraft] = useState(String(fixture.xMm));
+  const [yDraft, setYDraft] = useState(String(fixture.yMm));
+
+  return (
+    <InspectorShell title={fixture.label ?? fixture.fixtureType} onClose={onClose}>
+      <Field label="Type" value={fixture.fixtureType} />
+
+      <label className="flex flex-col gap-1 text-sm mt-1">
+        <span className="text-foreground/50">Label</span>
+        <div className="flex gap-2">
+          <input
+            value={labelDraft}
+            disabled={!isDraft}
+            onChange={(e) => setLabelDraft(e.target.value)}
+            className="border rounded px-2 py-1 text-sm w-32"
+          />
+          <button
+            className="btn btn-secondary"
+            disabled={!isDraft}
+            onClick={() => onUpdateFixture(fixture.id, { label: labelDraft || null })}
+          >
+            Apply
+          </button>
+        </div>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm mt-1">
+        <span className="text-foreground/50">Width / Height (mm)</span>
+        <div className="flex gap-2">
+          <input type="number" value={widthDraft} disabled={!isDraft} onChange={(e) => setWidthDraft(e.target.value)} className="border rounded px-2 py-1 text-sm w-20" />
+          <input type="number" value={heightDraft} disabled={!isDraft} onChange={(e) => setHeightDraft(e.target.value)} className="border rounded px-2 py-1 text-sm w-20" />
+          <button
+            className="btn btn-secondary"
+            disabled={!isDraft}
+            onClick={() => onUpdateFixture(fixture.id, { widthMm: Number(widthDraft), heightMm: Number(heightDraft) })}
+          >
+            Apply
+          </button>
+        </div>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm mt-1">
+        <span className="text-foreground/50">Clearance (mm)</span>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            value={clearanceDraft}
+            disabled={!isDraft}
+            onChange={(e) => setClearanceDraft(e.target.value)}
+            className="border rounded px-2 py-1 text-sm w-20"
+          />
+          <button
+            className="btn btn-secondary"
+            disabled={!isDraft}
+            onClick={() => onUpdateFixture(fixture.id, { clearanceMm: Number(clearanceDraft) })}
+          >
+            Apply
+          </button>
+        </div>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm mt-1">
+        <span className="text-foreground/50">Position (mm, top-left)</span>
+        <div className="flex gap-2">
+          <input type="number" value={xDraft} disabled={!isDraft} onChange={(e) => setXDraft(e.target.value)} className="border rounded px-2 py-1 text-sm w-20" />
+          <input type="number" value={yDraft} disabled={!isDraft} onChange={(e) => setYDraft(e.target.value)} className="border rounded px-2 py-1 text-sm w-20" />
+          <button
+            className="btn btn-secondary"
+            disabled={!isDraft}
+            onClick={() => onUpdateFixture(fixture.id, { xMm: Number(xDraft), yMm: Number(yDraft) })}
+          >
+            Apply
+          </button>
+        </div>
+      </label>
+
+      <DeleteAction
+        disabled={!isDraft}
+        onDelete={() => {
+          if (!confirm("Delete this fixture? This cannot be undone.")) return;
+          onDeleteFixture(fixture.id);
+          onClose();
+        }}
+      />
+    </InspectorShell>
   );
 }
